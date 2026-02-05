@@ -110,10 +110,6 @@ void loop() {
       angleY = (cos(radians(direction)) * 45) + 90;
       servoX.write(angleX);
       servoY.write(angleY);
-      // Serial.print("X: ");
-      // Serial.print(angleX);
-      // Serial.print(", Y: ");
-      // Serial.println(angleY);
     }
   }
 }
