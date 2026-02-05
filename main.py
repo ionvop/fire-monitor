@@ -7,7 +7,7 @@ import requests
 def main():
     model = YOLO("best.pt")
     cap = cv2.VideoCapture(f"http://{CAMERA_IP}:81/stream")
-    requests.get(f"http://{SERVO_IP}/surveilance?cmd=start")
+    requests.get(f"http://{SERVO_IP}/surveillance?cmd=start")
 
     if not cap.isOpened():
         print("Error: Could not open webcam")
@@ -56,7 +56,7 @@ def main():
             last_state = "retract"
 
         if cv2.waitKey(1) == 27:
-            requests.get("http://" + SERVO_IP + "/surveilance?cmd=stop")
+            requests.get("http://" + SERVO_IP + "/surveillance?cmd=stop")
             break
 
     cap.release()
