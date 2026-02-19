@@ -1,0 +1,124 @@
+<html>
+    <head>
+        <title>
+            Dashboard
+        </title>
+        <base href="./">
+        <link rel="stylesheet" href="style.css">
+        <link rel="shortcut icon" href="favicon.ico" type="image/x-icon">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            button {
+                width: 5rem;
+                height: 5rem;
+                font-weight: bold;
+            }
+        </style>
+    </head>
+    <body>
+        <div style="
+            display: grid;
+            grid-template-rows: 1fr repeat(3, max-content);
+            height: 100%;
+            box-sizing: border-box;">
+            <div style="
+                padding: 1rem;">
+                <img style="
+                    width: 100%;
+                    height: 100%;
+                    object-fit: contain;"
+                    id="imgStream">
+            </div>
+            <div style="
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);">
+                <div></div>
+                <div style="
+                    padding: 1rem;
+                    text-align: center;">
+                    <button id="btnUp">
+                        Up
+                    </button>
+                </div>
+                <div></div>
+            </div>
+            <div style="
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);">
+                <div style="
+                    padding: 1rem;
+                    text-align: center;">
+                    <button id="btnLeft">
+                        Left
+                    </button>
+                </div>
+                <div style="
+                    padding: 1rem;
+                    text-align: center;">
+                    <button id="btnShoot">
+                        Shoot
+                    </button>
+                </div>
+                <div style="
+                    padding: 1rem;
+                    text-align: center;">
+                    <button id="btnRight">
+                        Right
+                    </button>
+                </div>
+            </div>
+            <div style="
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);">
+                <div></div>
+                <div style="
+                    padding: 1rem;
+                    text-align: center;">
+                    <button id="btnDown">
+                        Down
+                    </button>
+                </div>
+            </div>
+        </div>
+        <script src="config.js"></script>
+        <script src="script.js"></script>
+        <script>
+            const imgStream = document.getElementById("imgStream");
+            const btnUp = document.getElementById("btnUp");
+            const btnLeft = document.getElementById("btnLeft");
+            const btnShoot = document.getElementById("btnShoot");
+            const btnRight = document.getElementById("btnRight");
+            const btnDown = document.getElementById("btnDown");
+            initialize();
+            
+            function initialize() {
+                imgStream.src = `http://${CAMERA_IP}:81/stream`;
+
+                directions = [
+                    {
+                        element: btnUp,
+                        direction: "up"
+                    },
+                    {
+                        element: btnLeft,
+                        direction: "left"
+                    },
+                    {
+                        element: btnRight,
+                        direction: "right"
+                    },
+                    {
+                        element: btnDown,
+                        direction: "down"
+                    }
+                ]
+
+                for (const direction of directions) {
+                    direction.element.onmousedown = () => {
+                        fetch(`http://${SERVO_IP}/?direction=${direction.direction}`);
+                    }
+                }
+            }
+        </script>
+    </body>
+</html>
