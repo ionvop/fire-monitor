@@ -2,10 +2,9 @@
 #include <WiFi.h>
 #define CAMERA_MODEL_AI_THINKER
 #include "camera_pins.h"
-#include "../config.h"
 
-const char *ssid = WIFI_SSID;
-const char *password = WIFI_PASSWORD;
+const char *ssid = "ESP32-Turret";
+const char *password = "12345678";
 void startCameraServer();
 void setupLedFlash(int pin);
 
