@@ -1,10 +1,9 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <ESP32Servo.h>
-#include <../config.h>
 
-const char *ssid = WIFI_SSID;
-const char *password = WIFI_PASSWORD;
+const char* apSSID = "ESP32-Turret";
+const char* apPassword = "12345678";
 const int SERVO_X_PIN = 13;
 const int SERVO_Y_PIN = 12;
 const int MOVE_INTERVAL = 20; // ms between movement steps
@@ -30,21 +29,18 @@ void setup() {
   servoY.attach(SERVO_Y_PIN);
   servoX.write(0);
   servoY.write(0);
-  Serial.print("Connecting to WiFi: ");
-  Serial.println(ssid);
-  WiFi.begin(ssid, password);
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-
-  Serial.println("\nConnected!");
+  Serial.println("Starting Access Point...");
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(apSSID, apPassword);
+  IPAddress IP = WiFi.softAPIP();
+  Serial.println("Access Point Started!");
+  Serial.print("SSID: ");
+  Serial.println(apSSID);
   Serial.print("IP Address: ");
-  Serial.println(WiFi.localIP());
+  Serial.println(IP);
   server.on("/surveillance", HTTP_GET, handleSurveillance);
   server.on("/trigger", HTTP_GET, handleTrigger);
-  server.on("/control", HTTP_GET, handleControl)
+  server.on("/control", HTTP_GET, handleControl);
   server.begin();
   Serial.println("HTTP Server started.");
   pinMode(RETRACT_PIN, OUTPUT);
@@ -159,7 +155,7 @@ void handleControl() {
     if (cmd == "start") {
       moveUp = true;
       server.send(200, "text/plain", "Started moving up");
-    } else (cmd == "stop") {
+    } else if (cmd == "stop") {
       moveUp = false;
       server.send(200, "text/plain", "Stopped moving up");
     } else {
@@ -169,7 +165,7 @@ void handleControl() {
     if (cmd == "start") {
       moveDown = true;
       server.send(200, "text/plain", "Started moving down");
-    } else (cmd == "stop") {
+    } else if (cmd == "stop") {
       moveDown = false;
       server.send(200, "text/plain", "Stopped moving down");
     } else {
@@ -179,7 +175,7 @@ void handleControl() {
     if (cmd == "start") {
       moveLeft = true;
       server.send(200, "text/plain", "Started moving left");
-    } else (cmd == "stop") {
+    } else if (cmd == "stop") {
       moveLeft = false;
       server.send(200, "text/plain", "Stopped moving left");
     } else {
@@ -189,7 +185,7 @@ void handleControl() {
     if (cmd == "start") {
       moveRight = true;
       server.send(200, "text/plain", "Started moving right");
-    } else (cmd == "stop") {
+    } else if (cmd == "stop") {
       moveRight = false;
       server.send(200, "text/plain", "Stopped moving right");
     } else {
