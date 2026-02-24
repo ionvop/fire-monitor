@@ -11,14 +11,13 @@ const int RETRACT_PIN = 27;
 const int FIRE_PIN = 26;
 Servo servoX;
 Servo servoY;
-Servo servoZ;
-bool surveillanceEnabled = true;
+bool surveillanceEnabled = false;
 bool moveUp = false;
 bool moveDown = false;
 bool moveLeft = false;
 bool moveRight = false;
-int angleX = 0;
-int angleY = 0;
+int angleX = 90;
+int angleY = 90;
 int direction = 0;
 unsigned long lastMoveTime = 0;
 WebServer server(80);
@@ -27,8 +26,8 @@ void setup() {
   Serial.begin(115200);
   servoX.attach(SERVO_X_PIN);
   servoY.attach(SERVO_Y_PIN);
-  servoX.write(0);
-  servoY.write(0);
+  servoX.write(90);
+  servoY.write(90);
   Serial.println("Starting Access Point...");
   WiFi.mode(WIFI_AP);
   WiFi.softAP(apSSID, apPassword);
@@ -38,6 +37,209 @@ void setup() {
   Serial.println(apSSID);
   Serial.print("IP Address: ");
   Serial.println(IP);
+
+  server.on("/", HTTP_GET, []() {
+    server.send(200, "text/html", R"rawliteral(
+      <html>
+          <head>
+              <title>
+                  Dashboard
+              </title>
+              <base href="./">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <style>
+                  body {
+                      margin: 0rem;
+                      padding: 0rem;
+                      background-color: #111;
+                      color: #fff;
+                      font-size: 1rem;
+                      font-family: Arial, Helvetica, sans-serif;
+                  }
+
+                  a {
+                      color: inherit;
+                      text-decoration: none;
+                  }
+
+                  button {
+                      padding: 1rem;
+                      background-color: #5af;
+                      color: #fff;
+                      font-size: 1rem;
+                      font-family: Arial, Helvetica, sans-serif;
+                      border: none;
+                      border-radius: 1rem;
+                      cursor: pointer;
+                      width: 5rem;
+                      height: 5rem;
+                      font-weight: bold;
+                  }
+
+                  form {
+                      margin-block-end: 0rem;
+                  }
+
+                  input {
+                      padding: 1rem;
+                      width: 100%;
+                      background-color: transparent;
+                      color: #fff;
+                      border: none;
+                      border-bottom: 1px solid #5af;
+                      font-size: 1rem;
+                      font-family: Arial, Helvetica, sans-serif;
+                  }
+
+                  select {
+                      padding: 1rem;
+                      width: 100%;
+                      background-color: transparent;
+                      color: #fff;
+                      border: none;
+                      border-bottom: 1px solid #5af;
+                      font-size: 1rem;
+                      font-family: Arial, Helvetica, sans-serif;
+                  }
+
+                  textarea {
+                      padding: 1rem;
+                      width: 100%;
+                      background-color: transparent;
+                      color: #fff;
+                      height: 10rem;
+                      border: 1px solid #5af;
+                      font-size: 1rem;
+                      font-family: Arial, Helvetica, sans-serif;
+                      resize: vertical;
+                  }
+              </style>
+          </head>
+          <body>
+              <div style="
+                  display: grid;
+                  grid-template-rows: 1fr repeat(3, max-content);
+                  height: 100%;
+                  box-sizing: border-box;">
+                  <div style="
+                      padding: 1rem;">
+                      <img style="
+                          width: 100%;
+                          height: 100%;
+                          object-fit: contain;"
+                          id="imgStream">
+                  </div>
+                  <div style="
+                      display: grid;
+                      grid-template-columns: repeat(3, 1fr);">
+                      <div></div>
+                      <div style="
+                          padding: 1rem;
+                          text-align: center;">
+                          <button id="btnUp">
+                              Up
+                          </button>
+                      </div>
+                      <div></div>
+                  </div>
+                  <div style="
+                      display: grid;
+                      grid-template-columns: repeat(3, 1fr);">
+                      <div style="
+                          padding: 1rem;
+                          text-align: center;">
+                          <button id="btnLeft">
+                              Left
+                          </button>
+                      </div>
+                      <div style="
+                          padding: 1rem;
+                          text-align: center;">
+                          <button id="btnShoot">
+                              Shoot
+                          </button>
+                      </div>
+                      <div style="
+                          padding: 1rem;
+                          text-align: center;">
+                          <button id="btnRight">
+                              Right
+                          </button>
+                      </div>
+                  </div>
+                  <div style="
+                      display: grid;
+                      grid-template-columns: repeat(3, 1fr);">
+                      <div></div>
+                      <div style="
+                          padding: 1rem;
+                          text-align: center;">
+                          <button id="btnDown">
+                              Down
+                          </button>
+                      </div>
+                      <div></div>
+                  </div>
+              </div>
+              <script>
+                  CAMERA_IP = "192.168.4.2";
+                  const imgStream = document.getElementById("imgStream");
+                  const btnUp = document.getElementById("btnUp");
+                  const btnLeft = document.getElementById("btnLeft");
+                  const btnShoot = document.getElementById("btnShoot");
+                  const btnRight = document.getElementById("btnRight");
+                  const btnDown = document.getElementById("btnDown");
+                  initialize();
+                  
+                  function initialize() {
+                      for (let element of document.querySelectorAll("*")) {
+                          element.style.setProperty("--test", "test");
+                          element.style.removeProperty("--test");
+                      }
+
+                      imgStream.src = `http://${CAMERA_IP}:81/stream`;
+                      attachButton(btnUp, "up");
+                      attachButton(btnDown, "down");
+                      attachButton(btnLeft, "left");
+                      attachButton(btnRight, "right");
+                      attachButton(btnShoot, "shoot");
+                  }
+
+                  function sendCommand(direction, cmd) {
+                      fetch(`/control?direction=${direction}&cmd=${cmd}`)
+                          .catch(err => console.error("Request failed:", err)).then(res => res.text()).then(data => console.log(data));
+                  }
+
+                  function attachButton(button, direction) {
+                      let isPressed = false;
+
+                      const start = (e) => {
+                          e.preventDefault();
+                          if (isPressed) return;
+                          isPressed = true;
+                          sendCommand(direction, "start");
+                      };
+
+                      const stop = (e) => {
+                          e.preventDefault();
+                          if (!isPressed) return;
+                          isPressed = false;
+                          sendCommand(direction, "stop");
+                      };
+
+                      button.addEventListener("mousedown", start);
+                      button.addEventListener("mouseup", stop);
+                      button.addEventListener("mouseleave", stop);
+                      button.addEventListener("touchstart", start);
+                      button.addEventListener("touchend", stop);
+                      button.addEventListener("touchcancel", stop);
+                  }
+              </script>
+          </body>
+      </html>
+    )rawliteral");
+  });
+
   server.on("/surveillance", HTTP_GET, handleSurveillance);
   server.on("/trigger", HTTP_GET, handleTrigger);
   server.on("/control", HTTP_GET, handleControl);
@@ -86,16 +288,20 @@ void loop() {
       }
 
       if (moveRight) {
-        angleY += 1;
+        angleX += 1;
 
-        if (angleY > 180) {
-          angleY = 180;
+        if (angleX > 180) {
+          angleX = 180;
         }
       }
     }
 
     servoX.write(angleX);
     servoY.write(angleY);
+    Serial.print("X: ");
+    Serial.print(angleX);
+    Serial.print(" Y: ");
+    Serial.println(angleY);
   }
 }
 
@@ -191,8 +397,18 @@ void handleControl() {
     } else {
       server.send(400, "text/plain", "Invalid cmd. Use start or stop");
     }
+  } else if (direction == "shoot") {
+    if (cmd == "start") {
+      fire();
+      server.send(200, "text/plain", "Trigger fired");
+    } else if (cmd == "stop") {
+      retract();
+      server.send(200, "text/plain", "Trigger retracted");
+    } else {
+      server.send(400, "text/plain", "Invalid cmd. Use start or stop");
+    }
   } else {
-    server.send(400, "text/plain", "Invalid direction. Use up, downm, left, or right");
+    server.send(400, "text/plain", "Invalid direction. Use up, down, left, or right");
   }
 }
 
