@@ -1,6 +1,7 @@
-from config import CAMERA_IP, SERVO_IP
+from config import CAMERA_IP, SERVO_IP, MIN_FIRE_DURATION
 from ultralytics import YOLO
 import requests
+import time
 import cv2
 
 
@@ -15,6 +16,7 @@ def main():
 
     print("Press ESC to exit...")
     last_state = None
+    fire_start_time = None
 
     while True:
         ret, frame = cap.read()
@@ -48,16 +50,26 @@ def main():
                         fire_detected = True
                         break
 
-        if fire_detected and last_state != "fire":
-            requests.get(f"http://{SERVO_IP}/trigger?cmd=fire")
-            last_state = "fire"
-        elif not fire_detected and last_state != "retract":
-            requests.get(f"http://{SERVO_IP}/trigger?cmd=retract")
-            last_state = "retract"
+        current_time = time.monotonic()
+
+        if fire_detected:
+            if last_state != "fire":
+                requests.get(f"http://{SERVO_IP}/trigger?cmd=fire")
+                fire_start_time = current_time
+                last_state = "fire"
+        else:
+            if last_state == "fire":
+                if fire_start_time is not None and (current_time - fire_start_time) >= MIN_FIRE_DURATION:
+                    requests.get(f"http://{SERVO_IP}/trigger?cmd=retract")
+                    last_state = "retract"
+                    fire_start_time = None
+            elif last_state != "retract":
+                requests.get(f"http://{SERVO_IP}/trigger?cmd=retract")
+                last_state = "retract"
 
         if cv2.waitKey(1) == 27:
-            requests.get(f"http://{SERVO_IP}/surveillance?cmd=stop")
             requests.get(f"http://{SERVO_IP}/trigger?cmd=retract")
+            requests.get(f"http://{SERVO_IP}/surveillance?cmd=stop")
             break
 
     cap.release()
