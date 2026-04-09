@@ -9,8 +9,10 @@ const int SERVO_Y_PIN = 12;
 const int MOVE_INTERVAL = 20; // ms between movement steps
 const int RETRACT_PIN = 27;
 const int FIRE_PIN = 26;
+const int TRIGGER_PIN = 14;
 Servo servoX;
 Servo servoY;
+Servo servoTrigger;
 bool surveillanceEnabled = false;
 bool moveUp = false;
 bool moveDown = false;
@@ -18,6 +20,7 @@ bool moveLeft = false;
 bool moveRight = false;
 int angleX = 90;
 int angleY = 90;
+int angleTrigger = 90;
 int direction = 0;
 unsigned long lastMoveTime = 0;
 WebServer server(80);
@@ -26,8 +29,10 @@ void setup() {
   Serial.begin(115200);
   servoX.attach(SERVO_X_PIN);
   servoY.attach(SERVO_Y_PIN);
+  servoTrigger.attach(TRIGGER_PIN);
   servoX.write(90);
   servoY.write(90);
+  servoTrigger.write(90);
   Serial.println("Starting Access Point...");
   WiFi.mode(WIFI_AP);
   WiFi.softAP(apSSID, apPassword);
@@ -298,6 +303,7 @@ void loop() {
 
     servoX.write(angleX);
     servoY.write(angleY);
+    servoTrigger.write(angleTrigger);
     Serial.print("X: ");
     Serial.print(angleX);
     Serial.print(" Y: ");
@@ -415,9 +421,11 @@ void handleControl() {
 void fire() {
   digitalWrite(RETRACT_PIN, LOW);
   digitalWrite(FIRE_PIN, HIGH);
+  angleTrigger = 180;
 }
 
 void retract() {
   digitalWrite(RETRACT_PIN, HIGH);
   digitalWrite(FIRE_PIN, LOW);
+  angleTrigger = 90;
 }
