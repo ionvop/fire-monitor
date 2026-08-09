@@ -1,15 +1,8 @@
-The new purpose of this ESP32 server is to simply control the three servos:
+Please rewrite the entire Python code so that it does the following:
 
-- The first servo controls the horizontal movement of the turret.
-- The second servo controls the vertical movement of the turret.
-- The third servo controls the firing of the turret.
-
-You may modify the endpoints to be more aligned with standard API specifications.
-
-Please keep these functionalities and remove everything else such as:
-
-- The surveillance mode.
-- The HTML control panel provided on the root page.
-- Things I forgot to mention if any.
-
-If you're wondering about inconsistencies you may find, I recently just removed the code for ESP32-CAM because we're planning on switching to a webcam.
+1. Use the webcam for video capture. (We're scrapping the idea of using ESP32-CAM)
+2. Use the `best.py` model for fire detection.
+3. Using the movement endpoints in the Servo controller, scan the room for fire.
+4. If fire is detected, send a `fire` command to the Servo controller.
+5. This script also serves a dashboard for manual control.
+6. If a user is connected to the dashboard, this script stops the automatic movement of the turret and allows manual control.
