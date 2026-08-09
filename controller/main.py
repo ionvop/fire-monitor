@@ -8,7 +8,6 @@ import cv2
 def main():
     model = YOLO("best.pt")
     cap = cv2.VideoCapture(f"http://{CAMERA_IP}:81/stream")
-    requests.get(f"http://{SERVO_IP}/surveillance?cmd=start")
 
     if not cap.isOpened():
         print("Error: Could not open webcam")
@@ -54,22 +53,21 @@ def main():
 
         if fire_detected:
             if last_state != "fire":
-                requests.get(f"http://{SERVO_IP}/trigger?cmd=fire")
+                requests.get(f"http://{SERVO_IP}/api/servo/trigger?state=fire")
                 fire_start_time = current_time
                 last_state = "fire"
         else:
             if last_state == "fire":
                 if fire_start_time is not None and (current_time - fire_start_time) >= MIN_FIRE_DURATION:
-                    requests.get(f"http://{SERVO_IP}/trigger?cmd=retract")
+                    requests.get(f"http://{SERVO_IP}/api/servo/trigger?state=retract")
                     last_state = "retract"
                     fire_start_time = None
             elif last_state != "retract":
-                requests.get(f"http://{SERVO_IP}/trigger?cmd=retract")
+                requests.get(f"http://{SERVO_IP}/api/servo/trigger?state=retract")
                 last_state = "retract"
 
         if cv2.waitKey(1) == 27:
-            requests.get(f"http://{SERVO_IP}/trigger?cmd=retract")
-            requests.get(f"http://{SERVO_IP}/surveillance?cmd=stop")
+            requests.get(f"http://{SERVO_IP}/api/servo/trigger?state=retract")
             break
 
     cap.release()
