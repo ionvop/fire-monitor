@@ -164,7 +164,23 @@
             }
 
             function sendCommand(direction, cmd) {
-                fetch(`/control?direction=${direction}&cmd=${cmd}`)
+                let url;
+
+                if (direction === "shoot") {
+                    const state = cmd === "start" ? "fire" : "retract";
+                    url = `/api/servo/trigger?state=${state}`;
+                } else {
+                    const mapping = {
+                        up:    { axis: "y", dir: "up" },
+                        down:  { axis: "y", dir: "down" },
+                        left:  { axis: "x", dir: "left" },
+                        right: { axis: "x", dir: "right" }
+                    };
+                    const m = mapping[direction];
+                    url = `/api/move?axis=${m.axis}&dir=${m.dir}&cmd=${cmd}`;
+                }
+
+                fetch(url)
                     .catch(err => console.error("Request failed:", err)).then(res => res.text()).then(data => console.log(data));
             }
 
