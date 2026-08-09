@@ -138,9 +138,8 @@
                 </div>
             </div>
         </div>
+        <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
         <script>
-            SERVO_IP = "192.168.4.1";
-            CAMERA_IP = "192.168.4.2";
             const imgStream = document.getElementById("imgStream");
             const btnUp = document.getElementById("btnUp");
             const btnLeft = document.getElementById("btnLeft");
@@ -155,12 +154,18 @@
                     element.style.removeProperty("--test");
                 }
 
-                imgStream.src = `http://${CAMERA_IP}:81/stream`;
+                imgStream.src = "/video_feed";
                 attachButton(btnUp, "up");
                 attachButton(btnDown, "down");
                 attachButton(btnLeft, "left");
                 attachButton(btnRight, "right");
                 attachButton(btnShoot, "shoot");
+
+                // Open a persistent connection so the controller knows a user
+                // is connected and pauses automatic scanning.
+                const socket = io();
+                socket.on("connect", () => console.log("Connected to controller"));
+                socket.on("disconnect", () => console.log("Disconnected from controller"));
             }
 
             function sendCommand(direction, cmd) {
