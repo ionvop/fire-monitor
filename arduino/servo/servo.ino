@@ -13,6 +13,15 @@ const int TRIGGER_PIN = 14;
 Servo servoX;
 Servo servoY;
 Servo servoTrigger;
+
+// The X servo is physically wired inverted: servo angle 0 points right and
+// 180 points left. The API and internal angleX always use the convention
+// "higher = right, lower = left", so we flip the value only when writing to
+// the servo hardware.
+int apiToServoX(int api) {
+  return 180 - api;
+}
+
 bool moveUp = false;
 bool moveDown = false;
 bool moveLeft = false;
@@ -93,7 +102,7 @@ void loop() {
       }
     }
 
-    servoX.write(angleX);
+    servoX.write(apiToServoX(angleX));
     servoY.write(angleY);
     servoTrigger.write(angleTrigger);
     Serial.print("X: ");
@@ -120,7 +129,7 @@ void handleServoX() {
 
   int angle = server.arg("angle").toInt();
   angleX = constrain(angle, 0, 180);
-  servoX.write(angleX);
+  servoX.write(apiToServoX(angleX));
   server.send(200, "text/plain", "X set to " + String(angleX));
 }
 
