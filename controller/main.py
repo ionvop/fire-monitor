@@ -1,6 +1,7 @@
 import os
 import threading
 import time
+from datetime import datetime
 
 import cv2
 import requests
@@ -166,6 +167,19 @@ def detection_loop(model, cap):
 
         results = model(frame, imgsz=640)
         annotated_frame = results[0].plot()
+
+        # Overlay the current datetime on the annotated frame.
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cv2.putText(
+            annotated_frame,
+            timestamp,
+            (10, 30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (0, 255, 0),
+            2,
+            cv2.LINE_AA,
+        )
 
         # Publish the annotated frame for the dashboard stream.
         _, jpeg = cv2.imencode(".jpg", annotated_frame)
