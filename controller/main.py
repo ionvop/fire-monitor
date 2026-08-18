@@ -184,27 +184,21 @@ def clear_captures():
 # Automatic scanning
 # ---------------------------------------------------------------------------
 class RoomScanner:
-    """Traces a clockwise rectangle across the room using the /api/move endpoints.
+    """Scans the room by sweeping each direction until it hits an edge.
 
     The ESP32 moves continuously while a movement flag is set, so the scanner
     keeps the desired direction active and only issues a stop when it needs to
     reverse or pause. It polls /api/status to learn the current angles.
 
-    The rectangle is defined by the configured x/y min/max corners and is
-    traversed clockwise starting from the top-left:
-        top-left -> top-right -> bottom-right -> bottom-left -> top-left
+    The scan follows a simple repeating pattern, holding each direction until
+    the corresponding edge (defined by the configured x/y min/max) is reached:
+        up -> right -> down -> left -> repeat
     """
 
     def __init__(self):
-        # Clockwise corners starting from the top-left. "Up" is increasing Y
-        # (toward SCAN_Y_MAX), so the top edge sits at SCAN_Y_MAX.
-        self.corners = [
-            (SCAN_X_MIN, SCAN_Y_MAX),  # top-left
-            (SCAN_X_MAX, SCAN_Y_MAX),  # top-right
-            (SCAN_X_MAX, SCAN_Y_MIN),  # bottom-right
-            (SCAN_X_MIN, SCAN_Y_MIN),  # bottom-left
-        ]
-        self.corner_index = 0
+        # Direction index into the up/right/down/left cycle. "Up" is increasing
+        # Y (toward SCAN_Y_MAX), so the top edge sits at SCAN_Y_MAX.
+        self._direction_index = 0
         self._x_moving = False
         self._y_moving = False
 
@@ -244,21 +238,34 @@ class RoomScanner:
         x = status.get("x", 90)
         y = status.get("y", 90)
 
-        target_x, target_y = self.corners[self.corner_index]
+        # Check whether the current direction has reached its edge.
+        reached_edge = False
+        if self._direction_index == 0:      # up
+            reached_edge = y >= SCAN_Y_MAX - SCAN_CORNER_TOLERANCE
+        elif self._direction_index == 1:    # right
+            reached_edge = x >= SCAN_X_MAX - SCAN_CORNER_TOLERANCE
+        elif self._direction_index == 2:    # down
+            reached_edge = y <= SCAN_Y_MIN + SCAN_CORNER_TOLERANCE
+        else:                               # left
+            reached_edge = x <= SCAN_X_MIN + SCAN_CORNER_TOLERANCE
 
-        # Move one axis at a time toward the target corner so the turret
+        if reached_edge:
+            self._direction_index = (self._direction_index + 1) % 4
+
+        # Move one axis at a time for the current direction so the turret
         # traces clean right-angle edges (no diagonal cutting).
-        if abs(x - target_x) > SCAN_CORNER_TOLERANCE:
-            self._set_x("right" if target_x > x else "left")
-            self._set_y(None)
-        elif abs(y - target_y) > SCAN_CORNER_TOLERANCE:
-            self._set_y("up" if target_y > y else "down")
+        if self._direction_index == 0:      # up
+            self._set_y("up")
             self._set_x(None)
-        else:
-            # Reached the corner; advance to the next one clockwise.
-            self._set_x(None)
+        elif self._direction_index == 1:    # right
+            self._set_x("right")
             self._set_y(None)
-            self.corner_index = (self.corner_index + 1) % len(self.corners)
+        elif self._direction_index == 2:    # down
+            self._set_y("down")
+            self._set_x(None)
+        else:                               # left
+            self._set_x("left")
+            self._set_y(None)
 
 
 # ---------------------------------------------------------------------------
