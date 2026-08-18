@@ -7,6 +7,11 @@ WEBCAM_INDEX = 1
 # Fire detection
 FIRE_CONF_THRESHOLD = 0.5
 
+# Fire screenshot auto-capture
+CAPTURE_DIR = "captures"          # directory (gitignored) for saved fire screenshots
+CAPTURE_MAX = 50                  # keep at most this many captures (oldest removed)
+CAPTURE_ENABLED_DEFAULT = True    # initial state of the auto-capture toggle
+
 # Dashboard server
 DASHBOARD_HOST = "0.0.0.0"
 DASHBOARD_PORT = 5000
