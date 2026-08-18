@@ -10,6 +10,9 @@ from flask_socketio import SocketIO
 from ultralytics import YOLO
 
 from config import (
+    CAPTURE_DIR,
+    CAPTURE_ENABLED_DEFAULT,
+    CAPTURE_MAX,
     DASHBOARD_HOST,
     DASHBOARD_PORT,
     FIRE_CONF_THRESHOLD,
@@ -40,6 +43,7 @@ latest_frame = None          # JPEG bytes of the annotated frame
 auto_mode = True             # True = automatic scanning; False = manual control
 auto_fire = True             # Auto-fire on detection (only relevant in manual mode)
 fire_active = False          # True while the trigger is firing
+capture_enabled = CAPTURE_ENABLED_DEFAULT  # Auto-save fire screenshots
 
 
 # ---------------------------------------------------------------------------
@@ -72,6 +76,109 @@ def get_status():
         return resp.json()
     except ValueError:
         return None
+
+
+# ---------------------------------------------------------------------------
+# Fire screenshot capture
+# ---------------------------------------------------------------------------
+def _capture_dir():
+    """Return the absolute path to the capture directory, creating it if needed."""
+    path = os.path.abspath(CAPTURE_DIR)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def list_captures():
+    """Return a list of capture dicts (filename, timestamp), newest first."""
+    path = _capture_dir()
+    captures = []
+    for name in os.listdir(path):
+        full = os.path.join(path, name)
+        if not os.path.isfile(full) or not name.lower().endswith(".jpg"):
+            continue
+        try:
+            ts = datetime.fromtimestamp(os.path.getmtime(full)).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+        except OSError:
+            ts = ""
+        captures.append({"filename": name, "timestamp": ts})
+    captures.sort(key=lambda c: c["filename"], reverse=True)
+    return captures
+
+
+def _enforce_capture_limit():
+    """Delete the oldest captures so at most CAPTURE_MAX remain."""
+    path = _capture_dir()
+    files = sorted(
+        (os.path.join(path, name) for name in os.listdir(path)
+         if name.lower().endswith(".jpg")),
+        key=os.path.getmtime,
+    )
+    while len(files) > CAPTURE_MAX:
+        oldest = files.pop(0)
+        try:
+            os.remove(oldest)
+        except OSError:
+            pass
+
+
+def save_capture(frame):
+    """Save an annotated frame as a JPEG capture and enforce the size cap.
+
+    Returns the filename on success, or None on failure.
+    """
+    if frame is None:
+        return None
+    path = _capture_dir()
+    filename = datetime.now().strftime("%Y%m%d_%H%M%S") + ".jpg"
+    full = os.path.join(path, filename)
+    # Avoid collisions if two events land in the same second.
+    counter = 1
+    while os.path.exists(full):
+        filename = datetime.now().strftime("%Y%m%d_%H%M%S") + f"_{counter}.jpg"
+        full = os.path.join(path, filename)
+        counter += 1
+    ok, jpeg = cv2.imencode(".jpg", frame)
+    if not ok:
+        return None
+    try:
+        with open(full, "wb") as f:
+            f.write(jpeg.tobytes())
+    except OSError as exc:
+        print(f"Failed to save capture: {exc}")
+        return None
+    _enforce_capture_limit()
+    print(f"Saved fire capture: {filename}")
+    return filename
+
+
+def delete_capture(filename):
+    """Delete a single capture file. Returns True if it was removed."""
+    path = _capture_dir()
+    full = os.path.join(path, os.path.basename(filename))
+    if not os.path.isfile(full):
+        return False
+    try:
+        os.remove(full)
+        return True
+    except OSError:
+        return False
+
+
+def clear_captures():
+    """Delete all capture files. Returns the number removed."""
+    path = _capture_dir()
+    removed = 0
+    for name in os.listdir(path):
+        full = os.path.join(path, name)
+        if os.path.isfile(full) and name.lower().endswith(".jpg"):
+            try:
+                os.remove(full)
+                removed += 1
+            except OSError:
+                pass
+    return removed
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +306,7 @@ def detection_loop(model, cap):
         with state_lock:
             auto = auto_mode
             auto_fire_enabled = auto_fire
+            capture_on = capture_enabled
 
         current_time = time.monotonic()
 
@@ -212,6 +320,9 @@ def detection_loop(model, cap):
                 last_state = "fire"
                 with state_lock:
                     fire_active = True
+                # Save a screenshot of the annotated frame on first detection.
+                if capture_on:
+                    save_capture(annotated_frame)
         else:
             if last_state == "fire":
                 if fire_start_time is not None and (current_time - fire_start_time) >= MIN_FIRE_DURATION:
@@ -269,6 +380,7 @@ def api_status():
         status["auto_mode"] = auto_mode
         status["auto_fire"] = auto_fire
         status["fire_active"] = fire_active
+        status["capture_enabled"] = capture_enabled
     return jsonify(status)
 
 
@@ -350,6 +462,55 @@ def api_servo_y():
     if resp is None:
         return jsonify({"error": "Servo controller unreachable"}), 502
     return resp.text, resp.status_code
+
+
+# ---------------------------------------------------------------------------
+# Fire screenshot capture routes
+# ---------------------------------------------------------------------------
+@app.route("/api/capture/status")
+def api_capture_status():
+    with state_lock:
+        return jsonify({"enabled": capture_enabled})
+
+
+@app.route("/api/capture", methods=["POST"])
+def api_capture_toggle():
+    """Enable or disable automatic fire screenshot capture.
+
+    JSON body:
+        {"enabled": true | false}
+    """
+    global capture_enabled
+    data = request.get_json(silent=True) or {}
+    enabled = data.get("enabled")
+    if not isinstance(enabled, bool):
+        return jsonify({"error": "enabled must be a boolean"}), 400
+    with state_lock:
+        capture_enabled = enabled
+    return jsonify({"enabled": capture_enabled})
+
+
+@app.route("/api/captures")
+def api_captures():
+    return jsonify({"captures": list_captures()})
+
+
+@app.route("/captures/<path:filename>")
+def api_capture_image(filename):
+    return send_from_directory(_capture_dir(), filename)
+
+
+@app.route("/api/captures/<path:filename>", methods=["DELETE"])
+def api_capture_delete(filename):
+    if delete_capture(filename):
+        return jsonify({"deleted": filename})
+    return jsonify({"error": "Capture not found"}), 404
+
+
+@app.route("/api/captures", methods=["DELETE"])
+def api_captures_clear():
+    removed = clear_captures()
+    return jsonify({"deleted": removed})
 
 
 # ---------------------------------------------------------------------------
