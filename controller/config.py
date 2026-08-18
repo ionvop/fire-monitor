@@ -12,10 +12,10 @@ DASHBOARD_HOST = "0.0.0.0"
 DASHBOARD_PORT = 5000
 
 # Automatic scanning (continuous sweep via /api/move)
-SCAN_X_MIN = 0
-SCAN_X_MAX = 180
-SCAN_Y_MIN = 0
-SCAN_Y_MAX = 180
+SCAN_X_MIN = 10
+SCAN_X_MAX = 170
+SCAN_Y_MIN = 45
+SCAN_Y_MAX = 135
 SCAN_Y_STEP = 10
 SCAN_STATUS_POLL_INTERVAL = 0.1  # seconds between /api/status polls
 SCAN_Y_STEP_INTERVAL = 3.0       # seconds between Y steps
