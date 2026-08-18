@@ -19,7 +19,7 @@ DASHBOARD_PORT = 5000
 # Automatic scanning (clockwise rectangle via /api/move)
 SCAN_X_MIN = 10
 SCAN_X_MAX = 170
-SCAN_Y_MIN = 45
-SCAN_Y_MAX = 135
-SCAN_CORNER_TOLERANCE = 2.0  # degrees of error allowed before a corner is "reached"
+SCAN_Y_MIN = 70
+SCAN_Y_MAX = 110
+SCAN_CORNER_TOLERANCE = 10  # degrees of error allowed before a corner is "reached"
 SCAN_STATUS_POLL_INTERVAL = 0.1  # seconds between /api/status polls
