@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+    <head>
+        <meta charset="UTF-8">
+        <title>Dashboard</title>
+        <base href="./">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <link rel="stylesheet" href="/src/style.css">
+    </head>
+    <body class="h-full">
+        <div class="grid h-full grid-rows-[1fr_max-content_max-content_max-content] box-border">
+            <div class="p-4">
+                <img
+                    id="imgStream"
+                    class="w-full h-full object-contain"
+                    alt="Live camera feed">
+            </div>
+            <div class="grid grid-cols-3">
+                <div></div>
+                <div class="p-4 text-center">
+                    <button
+                        id="btnUp"
+                        class="btn btn-lg btn-primary w-20 h-20 rounded-full">
+                        Up
+                    </button>
+                </div>
+                <div></div>
+            </div>
+            <div class="grid grid-cols-3">
+                <div class="p-4 text-center">
+                    <button
+                        id="btnLeft"
+                        class="btn btn-lg btn-primary w-20 h-20 rounded-full">
+                        Left
+                    </button>
+                </div>
+                <div class="p-4 text-center">
+                    <button
+                        id="btnShoot"
+                        class="btn btn-lg btn-error w-20 h-20 rounded-full">
+                        Shoot
+                    </button>
+                </div>
+                <div class="p-4 text-center">
+                    <button
+                        id="btnRight"
+                        class="btn btn-lg btn-primary w-20 h-20 rounded-full">
+                        Right
+                    </button>
+                </div>
+            </div>
+            <div class="grid grid-cols-3">
+                <div></div>
+                <div class="p-4 text-center">
+                    <button
+                        id="btnDown"
+                        class="btn btn-lg btn-primary w-20 h-20 rounded-full">
+                        Down
+                    </button>
+                </div>
+            </div>
+        </div>
+        <script type="module" src="/src/main.js"></script>
+    </body>
+</html>
