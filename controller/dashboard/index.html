@@ -78,6 +78,12 @@
                                 <input id="autoFireToggle" type="checkbox" class="toggle toggle-error" checked>
                             </div>
 
+                            <!-- Auto-capture toggle (visible in both modes) -->
+                            <div class="flex items-center justify-between gap-2 rounded-box bg-base-100 p-2">
+                                <span class="text-sm">Auto-capture fire screenshots</span>
+                                <input id="captureToggle" type="checkbox" class="toggle toggle-primary" checked>
+                            </div>
+
                             <!-- Movement pad -->
                             <div class="grid grid-cols-3 gap-2">
                                 <div></div>
@@ -162,6 +168,28 @@
                     </div>
                 </section>
             </main>
+
+            <!-- Fire screenshot gallery -->
+            <section class="card bg-base-200 shadow">
+                <div class="card-body p-4">
+                    <div class="flex items-center justify-between">
+                        <h2 class="card-title text-sm uppercase tracking-wider opacity-70">
+                            Fire captures
+                        </h2>
+                        <div class="flex items-center gap-2">
+                            <span id="captureCount" class="text-xs opacity-60">0 saved</span>
+                            <button id="btnClearCaptures" class="btn btn-sm btn-outline btn-error normal-case">
+                                Clear all
+                            </button>
+                        </div>
+                    </div>
+                    <div id="captureGallery" class="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+                        <p id="captureEmpty" class="col-span-full py-4 text-center text-sm opacity-50">
+                            No fire captures yet.
+                        </p>
+                    </div>
+                </div>
+            </section>
 
             <!-- Footer note -->
             <footer class="text-center text-xs opacity-50">
