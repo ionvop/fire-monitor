@@ -1,3 +1,4 @@
+import os
 import threading
 import time
 
@@ -23,7 +24,8 @@ from config import (
 )
 
 SERVO_BASE_URL = f"http://{SERVO_IP}"
-DASHBOARD_DIR = "../dashboard"
+DASHBOARD_DIR = "dashboard"
+DIST_DIR = os.path.join(DASHBOARD_DIR, "dist")
 
 # The ESP32 moves the servo 1 degree every MOVE_INTERVAL (20 ms).
 DEGREE_MOVE_SECONDS = 0.02
@@ -218,7 +220,12 @@ def detection_loop(model, cap):
 # ---------------------------------------------------------------------------
 @app.route("/")
 def index():
-    return send_from_directory(DASHBOARD_DIR, "index.html")
+    return send_from_directory(DIST_DIR, "index.html")
+
+
+@app.route("/assets/<path:filename>")
+def assets(filename):
+    return send_from_directory(os.path.join(DIST_DIR, "assets"), filename)
 
 
 @app.route("/video_feed")
