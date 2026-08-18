@@ -54,9 +54,29 @@
                     <!-- D-pad + shoot controls -->
                     <div class="card bg-base-200 shadow">
                         <div class="card-body p-4">
-                            <h2 class="card-title text-sm uppercase tracking-wider opacity-70">
-                                Turret controls
-                            </h2>
+                            <div class="flex items-center justify-between">
+                                <h2 class="card-title text-sm uppercase tracking-wider opacity-70">
+                                    Turret controls
+                                </h2>
+                                <!-- Mode toggle: automatic vs manual -->
+                                <div class="dropdown dropdown-end">
+                                    <div tabindex="0" role="button"
+                                         class="btn btn-sm btn-outline gap-2 normal-case">
+                                        <span id="modeToggleLabel" class="font-semibold">Auto</span>
+                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4"><path fill-rule="evenodd" d="M5.22 14.78a.75.75 0 0 1 0-1.06L11.94 7.5l.97.97-6.69 6.75a.75.75 0 0 1-1-.06ZM14 16.25a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z" clip-rule="evenodd"/></svg>
+                                    </div>
+                                    <div tabindex="0" class="dropdown-content z-10 menu w-44 rounded-box bg-base-100 p-2 shadow">
+                                        <li><a id="modeAuto" class="active">Automatic</a></li>
+                                        <li><a id="modeManual">Manual</a></li>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Auto-fire toggle (only visible in manual mode) -->
+                            <div id="autoFireRow" class="hidden flex items-center justify-between gap-2 rounded-box bg-base-100 p-2">
+                                <span class="text-sm">Auto-fire on detection</span>
+                                <input id="autoFireToggle" type="checkbox" class="toggle toggle-error" checked>
+                            </div>
 
                             <!-- Movement pad -->
                             <div class="grid grid-cols-3 gap-2">
@@ -131,7 +151,7 @@
                             </div>
 
                             <div class="mt-2 flex flex-wrap gap-2">
-                                <span id="badgeManual" class="badge badge-outline">Manual mode</span>
+                                <span id="badgeMode" class="badge badge-outline">Auto mode</span>
                                 <span id="badgeFire" class="badge badge-outline">Fire: inactive</span>
                             </div>
 
@@ -145,7 +165,7 @@
 
             <!-- Footer note -->
             <footer class="text-center text-xs opacity-50">
-                Automatic scanning pauses while you're connected.
+                Automatic mode scans continuously; switch to Manual to control the turret.
             </footer>
         </div>
 
