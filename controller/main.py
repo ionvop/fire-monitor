@@ -21,8 +21,7 @@ from config import (
     SCAN_X_MIN,
     SCAN_Y_MAX,
     SCAN_Y_MIN,
-    SCAN_Y_STEP,
-    SCAN_Y_STEP_INTERVAL,
+    SCAN_CORNER_TOLERANCE,
     SERVO_IP,
     WEBCAM_INDEX,
 )
@@ -185,17 +184,27 @@ def clear_captures():
 # Automatic scanning
 # ---------------------------------------------------------------------------
 class RoomScanner:
-    """Sweeps the turret across the room using the /api/move endpoints.
+    """Traces a clockwise rectangle across the room using the /api/move endpoints.
 
     The ESP32 moves continuously while a movement flag is set, so the scanner
     keeps the desired direction active and only issues a stop when it needs to
     reverse or pause. It polls /api/status to learn the current angles.
+
+    The rectangle is defined by the configured x/y min/max corners and is
+    traversed clockwise starting from the top-left:
+        top-left -> top-right -> bottom-right -> bottom-left -> top-left
     """
 
     def __init__(self):
-        self.x_dir = 1
-        self.y_dir = 1
-        self.last_y_step = time.monotonic()
+        # Clockwise corners starting from the top-left. "Up" is increasing Y
+        # (toward SCAN_Y_MAX), so the top edge sits at SCAN_Y_MAX.
+        self.corners = [
+            (SCAN_X_MIN, SCAN_Y_MAX),  # top-left
+            (SCAN_X_MAX, SCAN_Y_MAX),  # top-right
+            (SCAN_X_MAX, SCAN_Y_MIN),  # bottom-right
+            (SCAN_X_MIN, SCAN_Y_MIN),  # bottom-left
+        ]
+        self.corner_index = 0
         self._x_moving = False
         self._y_moving = False
 
@@ -235,24 +244,21 @@ class RoomScanner:
         x = status.get("x", 90)
         y = status.get("y", 90)
 
-        # Reverse X direction at the sweep limits.
-        if x <= SCAN_X_MIN:
-            self.x_dir = 1
-        elif x >= SCAN_X_MAX:
-            self.x_dir = -1
+        target_x, target_y = self.corners[self.corner_index]
 
-        # Step Y periodically (raster pattern).
-        now = time.monotonic()
-        if now - self.last_y_step >= SCAN_Y_STEP_INTERVAL:
-            self.last_y_step = now
-            if y <= SCAN_Y_MIN:
-                self.y_dir = 1
-            elif y >= SCAN_Y_MAX:
-                self.y_dir = -1
-            self._set_y("up" if self.y_dir == 1 else "down")
-
-        # Drive X in the current sweep direction.
-        self._set_x("right" if self.x_dir == 1 else "left")
+        # Move one axis at a time toward the target corner so the turret
+        # traces clean right-angle edges (no diagonal cutting).
+        if abs(x - target_x) > SCAN_CORNER_TOLERANCE:
+            self._set_x("right" if target_x > x else "left")
+            self._set_y(None)
+        elif abs(y - target_y) > SCAN_CORNER_TOLERANCE:
+            self._set_y("up" if target_y > y else "down")
+            self._set_x(None)
+        else:
+            # Reached the corner; advance to the next one clockwise.
+            self._set_x(None)
+            self._set_y(None)
+            self.corner_index = (self.corner_index + 1) % len(self.corners)
 
 
 # ---------------------------------------------------------------------------
