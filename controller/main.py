@@ -36,7 +36,8 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 # Shared state between the detection thread and the web server.
 state_lock = threading.Lock()
 latest_frame = None          # JPEG bytes of the annotated frame
-manual_mode = False          # True while a dashboard user is connected
+auto_mode = True             # True = automatic scanning; False = manual control
+auto_fire = True             # Auto-fire on detection (only relevant in manual mode)
 fire_active = False          # True while the trigger is firing
 
 
@@ -182,11 +183,14 @@ def detection_loop(model, cap):
                     break
 
         with state_lock:
-            manual = manual_mode
+            auto = auto_mode
+            auto_fire_enabled = auto_fire
 
         current_time = time.monotonic()
 
-        if fire_detected:
+        # Automatic fire-on-detection. In automatic mode it is always enabled;
+        # in manual mode it follows the auto_fire toggle.
+        if fire_detected and (auto or auto_fire_enabled):
             if last_state != "fire":
                 scanner.stop()
                 servo_get("/api/servo/trigger", {"state": "fire"})
@@ -206,8 +210,8 @@ def detection_loop(model, cap):
                 servo_get("/api/servo/trigger", {"state": "retract"})
                 last_state = "retract"
 
-        # Automatic scanning only when no user is connected and no fire is active.
-        if not manual and not fire_active and last_state != "fire":
+        # Automatic scanning only in automatic mode and when no fire is active.
+        if auto and not fire_active and last_state != "fire":
             scanner.step()
         else:
             scanner.stop()
@@ -248,7 +252,8 @@ def api_status():
     if status is None:
         return jsonify({"error": "Servo controller unreachable"}), 502
     with state_lock:
-        status["manual_mode"] = manual_mode
+        status["auto_mode"] = auto_mode
+        status["auto_fire"] = auto_fire
         status["fire_active"] = fire_active
     return jsonify(status)
 
@@ -260,6 +265,9 @@ def api_move():
     cmd = request.args.get("cmd")
     if not all((axis, direction, cmd)):
         return jsonify({"error": "Missing axis, dir, or cmd"}), 400
+    with state_lock:
+        if auto_mode:
+            return jsonify({"error": "Turret is in automatic mode. Manual controls are disabled."}), 403
     resp = servo_get("/api/move", {"axis": axis, "dir": direction, "cmd": cmd})
     if resp is None:
         return jsonify({"error": "Servo controller unreachable"}), 502
@@ -271,10 +279,41 @@ def api_trigger():
     state = request.args.get("state")
     if state not in ("fire", "retract"):
         return jsonify({"error": "Invalid state. Use fire or retract"}), 400
+    with state_lock:
+        if auto_mode:
+            return jsonify({"error": "Turret is in automatic mode. Manual controls are disabled."}), 403
     resp = servo_get("/api/servo/trigger", {"state": state})
     if resp is None:
         return jsonify({"error": "Servo controller unreachable"}), 502
     return resp.text, resp.status_code
+
+
+@app.route("/api/mode", methods=["POST"])
+def api_mode():
+    """Switch between automatic and manual mode.
+
+    JSON body:
+        {"mode": "auto" | "manual", "auto_fire": true | false (optional)}
+    """
+    global auto_mode, auto_fire
+    data = request.get_json(silent=True) or {}
+    mode = data.get("mode")
+
+    if mode not in ("auto", "manual"):
+        return jsonify({"error": "Invalid mode. Use 'auto' or 'manual'"}), 400
+
+    with state_lock:
+        auto_mode = mode == "auto"
+        if "auto_fire" in data:
+            if not isinstance(data["auto_fire"], bool):
+                return jsonify({"error": "auto_fire must be a boolean"}), 400
+            auto_fire = data["auto_fire"]
+
+    # Switching to manual mode stops any scanning movement.
+    if not auto_mode:
+        stop_all_movement()
+
+    return jsonify({"auto_mode": auto_mode, "auto_fire": auto_fire})
 
 
 @app.route("/api/servo/x")
@@ -304,23 +343,12 @@ def api_servo_y():
 # ---------------------------------------------------------------------------
 @socketio.on("connect")
 def on_connect():
-    global manual_mode
-    with state_lock:
-        manual_mode = True
-    stop_all_movement()
-    print("Dashboard user connected - manual mode enabled")
+    print("Dashboard user connected")
 
 
 @socketio.on("disconnect")
 def on_disconnect():
-    global manual_mode
-    # Only exit manual mode when no dashboard clients remain.
-    clients = socketio.server.eio.sockets
-    connected = any(sid != request.sid for sid in clients)
-    if not connected:
-        with state_lock:
-            manual_mode = False
-        print("No dashboard users - resuming automatic scan")
+    print("Dashboard user disconnected")
 
 
 def main():
