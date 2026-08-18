@@ -25,3 +25,14 @@ body {
     height: 100%;
     object-fit: contain;
 }
+
+/* Fire capture gallery thumbnails. */
+.capture-item {
+    position: relative;
+    overflow: hidden;
+}
+
+.capture-item img {
+    display: block;
+    aspect-ratio: 4 / 3;
+}
