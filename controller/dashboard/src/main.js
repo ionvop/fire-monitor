@@ -8,6 +8,16 @@ const btnShoot = document.getElementById("btnShoot");
 const btnRight = document.getElementById("btnRight");
 const btnDown = document.getElementById("btnDown");
 
+// Status/alert elements
+const statusX = document.getElementById("statusX");
+const statusY = document.getElementById("statusY");
+const barX = document.getElementById("barX");
+const barY = document.getElementById("barY");
+const fireAlert = document.getElementById("fireAlert");
+const badgeManual = document.getElementById("badgeManual");
+const badgeFire = document.getElementById("badgeFire");
+const connStatus = document.getElementById("connStatus");
+
 initialize();
 
 function initialize() {
@@ -21,8 +31,79 @@ function initialize() {
     // Open a persistent connection so the controller knows a user
     // is connected and pauses automatic scanning.
     const socket = io();
-    socket.on("connect", () => console.log("Connected to controller"));
-    socket.on("disconnect", () => console.log("Disconnected from controller"));
+    socket.on("connect", () => {
+        console.log("Connected to controller");
+        setConnStatus(true);
+    });
+    socket.on("disconnect", () => {
+        console.log("Disconnected from controller");
+        setConnStatus(false);
+    });
+
+    // Live status polling.
+    setInterval(pollStatus, 1000);
+    pollStatus();
+
+    // Keyboard shortcuts.
+    window.addEventListener("keydown", (e) => handleKey(e, true));
+    window.addEventListener("keyup", (e) => handleKey(e, false));
+}
+
+function setConnStatus(connected) {
+    connStatus.classList.toggle("badge-error", !connected);
+    connStatus.classList.toggle("badge-success", connected);
+    connStatus.lastChild.textContent = connected ? " Connected" : " Disconnected";
+}
+
+function pollStatus() {
+    fetch("/api/status")
+        .then((res) => {
+            if (res.status === 502) throw new Error("Servo offline");
+            return res.json();
+        })
+        .then((data) => {
+            updateAngles(data);
+            updateFire(data.fire_active);
+            updateManual(data.manual_mode);
+        })
+        .catch((err) => console.error("Status poll failed:", err));
+}
+
+function updateAngles({ x, y }) {
+    const xi = Number.isFinite(x) ? Math.round(x) : "--";
+    const yi = Number.isFinite(y) ? Math.round(y) : "--";
+    statusX.textContent = `${xi}°`;
+    statusY.textContent = `${yi}°`;
+    barX.value = Number.isFinite(x) ? x : 0;
+    barY.value = Number.isFinite(y) ? y : 0;
+}
+
+function updateFire(active) {
+    fireAlert.classList.toggle("hidden", !active);
+    badgeFire.textContent = active ? "Fire: ACTIVE" : "Fire: inactive";
+    badgeFire.classList.toggle("badge-error", !!active);
+    badgeFire.classList.toggle("badge-outline", !active);
+    if (active) badgeFire.classList.toggle("badge-outline", false);
+}
+
+function updateManual(manual) {
+    badgeManual.classList.toggle("badge-primary", !!manual);
+    badgeManual.classList.toggle("badge-outline", !manual);
+}
+
+function handleKey(e, pressed) {
+    const dir = {
+        ArrowUp: "up",
+        ArrowDown: "down",
+        ArrowLeft: "left",
+        ArrowRight: "right",
+        " ": "shoot",
+    }[e.key];
+
+    if (!dir) return;
+    e.preventDefault();
+    if (pressed) startCommand(dir);
+    else stopCommand(dir);
 }
 
 function sendCommand(direction, cmd) {
@@ -48,6 +129,14 @@ function sendCommand(direction, cmd) {
         .then(data => console.log(data));
 }
 
+function startCommand(direction) {
+    sendCommand(direction, "start");
+}
+
+function stopCommand(direction) {
+    sendCommand(direction, "stop");
+}
+
 function attachButton(button, direction) {
     let isPressed = false;
 
@@ -55,14 +144,14 @@ function attachButton(button, direction) {
         e.preventDefault();
         if (isPressed) return;
         isPressed = true;
-        sendCommand(direction, "start");
+        startCommand(direction);
     };
 
     const stop = (e) => {
         e.preventDefault();
         if (!isPressed) return;
         isPressed = false;
-        sendCommand(direction, "stop");
+        stopCommand(direction);
     };
 
     button.addEventListener("mousedown", start);
