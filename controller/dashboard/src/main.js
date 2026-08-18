@@ -14,9 +14,19 @@ const statusY = document.getElementById("statusY");
 const barX = document.getElementById("barX");
 const barY = document.getElementById("barY");
 const fireAlert = document.getElementById("fireAlert");
-const badgeManual = document.getElementById("badgeManual");
+const badgeMode = document.getElementById("badgeMode");
 const badgeFire = document.getElementById("badgeFire");
 const connStatus = document.getElementById("connStatus");
+
+// Mode toggle elements
+const modeToggleLabel = document.getElementById("modeToggleLabel");
+const modeAuto = document.getElementById("modeAuto");
+const modeManual = document.getElementById("modeManual");
+const autoFireRow = document.getElementById("autoFireRow");
+const autoFireToggle = document.getElementById("autoFireToggle");
+
+// Client-side mirror of the turret mode, used to guard manual commands.
+let isAutoMode = true;
 
 initialize();
 
@@ -27,6 +37,11 @@ function initialize() {
     attachButton(btnLeft, "left");
     attachButton(btnRight, "right");
     attachButton(btnShoot, "shoot");
+
+    // Mode toggles
+    modeAuto.addEventListener("click", () => setMode("auto"));
+    modeManual.addEventListener("click", () => setMode("manual"));
+    autoFireToggle.addEventListener("change", () => setAutoFire(autoFireToggle.checked));
 
     // Open a persistent connection so the controller knows a user
     // is connected and pauses automatic scanning.
@@ -64,7 +79,7 @@ function pollStatus() {
         .then((data) => {
             updateAngles(data);
             updateFire(data.fire_active);
-            updateManual(data.manual_mode);
+            updateMode(data.auto_mode, data.auto_fire);
         })
         .catch((err) => console.error("Status poll failed:", err));
 }
@@ -86,9 +101,60 @@ function updateFire(active) {
     if (active) badgeFire.classList.toggle("badge-outline", false);
 }
 
-function updateManual(manual) {
-    badgeManual.classList.toggle("badge-primary", !!manual);
-    badgeManual.classList.toggle("badge-outline", !manual);
+function updateMode(auto, autoFire) {
+    const isAuto = auto !== false;
+    const isAutoFire = autoFire !== false;
+    isAutoMode = isAuto;
+
+    // Mode badge + dropdown label.
+    modeToggleLabel.textContent = isAuto ? "Auto" : "Manual";
+    badgeMode.textContent = isAuto ? "Auto mode" : "Manual mode";
+    badgeMode.classList.toggle("badge-primary", !isAuto);
+    badgeMode.classList.toggle("badge-outline", isAuto);
+    modeAuto.classList.toggle("active", isAuto);
+    modeManual.classList.toggle("active", !isAuto);
+
+    // Auto-fire toggle only visible in manual mode.
+    autoFireRow.classList.toggle("hidden", isAuto);
+    autoFireRow.classList.toggle("flex", !isAuto);
+    if (autoFireToggle.checked !== isAutoFire) {
+        autoFireToggle.checked = isAutoFire;
+    }
+
+    // Enable/disable manual controls.
+    const manualDisabled = isAuto;
+    [btnUp, btnDown, btnLeft, btnRight, btnShoot].forEach((btn) => {
+        btn.classList.toggle("btn-disabled", manualDisabled);
+        btn.disabled = manualDisabled;
+    });
+}
+
+function setMode(mode) {
+    fetch("/api/mode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode }),
+    })
+        .then((res) => res.json())
+        .then((data) => {
+            updateMode(data.auto_mode, data.auto_fire);
+            console.log("Mode set to", mode);
+        })
+        .catch((err) => console.error("Failed to set mode:", err));
+}
+
+function setAutoFire(enabled) {
+    fetch("/api/mode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "manual", auto_fire: enabled }),
+    })
+        .then((res) => res.json())
+        .then((data) => {
+            updateMode(data.auto_mode, data.auto_fire);
+            console.log("Auto-fire set to", enabled);
+        })
+        .catch((err) => console.error("Failed to set auto-fire:", err));
 }
 
 function handleKey(e, pressed) {
@@ -102,11 +168,17 @@ function handleKey(e, pressed) {
 
     if (!dir) return;
     e.preventDefault();
+    if (isAutoMode) return;
     if (pressed) startCommand(dir);
     else stopCommand(dir);
 }
 
 function sendCommand(direction, cmd) {
+    if (isAutoMode) {
+        console.warn("Manual commands are disabled in automatic mode.");
+        return;
+    }
+
     let url;
 
     if (direction === "shoot") {
