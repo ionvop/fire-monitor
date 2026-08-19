@@ -56,7 +56,12 @@ The project is divided into three main components:
 pip install -r requirements.txt
 ```
 3. Edit `config.py` and set the IP address of your Servo ESP32 (`SERVO_IP`).
-4. Place your YOLO model weights file as `best.pt` in the `controller/` directory.
+4. Download the recommended YOLO model weights and save them as `best.pt` in the `controller/` directory:
+    * Recommended model: [`best.pt`](https://github.com/luminous0219/fire-and-smoke-detection-yolov8/blob/main/weights/best.pt) from the [`fire-and-smoke-detection-yolov8`](https://github.com/luminous0219/fire-and-smoke-detection-yolov8) repository.
+    * Direct download (raw):
+    ```bash
+    curl -L -o best.pt https://github.com/luminous0219/fire-and-smoke-detection-yolov8/raw/refs/heads/main/weights/best.pt
+    ```
 5. Run the controller:
 ```bash
 python main.py
