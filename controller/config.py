@@ -1,6 +1,11 @@
 SERVO_IP = "192.168.4.1"
 MIN_FIRE_DURATION = 1.0
 
+# Debug safety switch: when True, the physical trigger is never fired, neither
+# from automatic fire-on-detection nor from the manual dashboard trigger. The
+# safe "retract" state still works. Set to False for normal operation.
+DEBUG_DISABLE_TRIGGER = True
+
 # Webcam
 WEBCAM_INDEX = 1
 
@@ -26,8 +31,10 @@ SCAN_STATUS_POLL_INTERVAL = 0.1  # seconds between /api/status polls
 
 # Automatic fire tracking (center + wave while firing)
 # Converts a pixel offset of the fire from the frame center into servo degrees.
-FIRE_TRACK_PIXELS_PER_DEGREE_X = 5.0
 FIRE_TRACK_PIXELS_PER_DEGREE_Y = 5.0
+# Fire is considered "centered" when its bbox center is within this many pixels
+# of the frame center; the turret stops moving once inside this deadzone.
+FIRE_TRACK_DEADBAND_PIXELS = 20
 # Up/down wave applied to the Y axis while firing (degrees, peak-to-peak).
 FIRE_WAVE_AMPLITUDE = 10.0
 # Full up/down wave cycle duration in seconds.
