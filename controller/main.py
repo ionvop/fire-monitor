@@ -42,7 +42,7 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 state_lock = threading.Lock()
 latest_frame = None          # JPEG bytes of the annotated frame
 auto_mode = True             # True = automatic scanning; False = manual control
-auto_fire = True             # Auto-fire on detection (only relevant in manual mode)
+auto_fire = False            # Auto-fire on detection (only relevant in manual mode)
 fire_active = False          # True while the trigger is firing
 capture_enabled = CAPTURE_ENABLED_DEFAULT  # Auto-save fire screenshots
 
