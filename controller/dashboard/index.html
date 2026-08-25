@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+        <title>Fire Monitor</title>
+        <base href="./">
+        <link rel="stylesheet" href="/src/style.css">
+    </head>
+    <body class="min-h-full">
+        <div class="mx-auto flex h-dvh max-w-7xl flex-col gap-3 p-3">
+            <!-- Header -->
+            <header class="navbar rounded-box bg-base-200 shadow">
+                <div class="flex-1">
+                    <span class="text-xl font-black tracking-tight text-accent">
+                        🔥 Fire Monitor
+                    </span>
+                </div>
+                <div class="flex-none">
+                    <span id="connStatus" class="badge badge-error gap-1">
+                        <span class="status-dot"></span>
+                        Connecting
+                    </span>
+                </div>
+            </header>
+
+            <!-- Main grid: video feed + control/status panel -->
+            <main class="grid flex-1 grid-cols-1 gap-3 lg:grid-cols-3">
+                <!-- Video feed -->
+                <section class="relative flex min-h-[40vh] items-center justify-center overflow-hidden rounded-box bg-black lg:col-span-2">
+                    <img
+                        id="imgStream"
+                        class="absolute inset-0 h-full w-full object-contain"
+                        alt="Live camera feed">
+
+                    <!-- Fire detection overlay -->
+                    <div id="fireAlert" class="absolute inset-x-0 top-0 hidden p-3">
+                        <div class="alert alert-error shadow-lg">
+                            <span class="text-sm font-bold uppercase tracking-wider">
+                                🔥 Fire detected
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Live badge over video -->
+                    <span class="absolute right-3 top-3 badge badge-primary gap-1">
+                        <span class="live-dot"></span>
+                        Live
+                    </span>
+                </section>
+
+                <!-- Control + status panel -->
+                <section class="flex flex-col gap-3">
+                    <!-- D-pad + shoot controls -->
+                    <div class="card bg-base-200 shadow">
+                        <div class="card-body p-4">
+                            <div class="flex items-center justify-between">
+                                <h2 class="card-title text-sm uppercase tracking-wider opacity-70">
+                                    Turret controls
+                                </h2>
+                                <!-- Mode toggle: automatic vs manual -->
+                                <div class="dropdown dropdown-end">
+                                    <div tabindex="0" role="button"
+                                         class="btn btn-sm btn-outline gap-2 normal-case">
+                                        <span id="modeToggleLabel" class="font-semibold">Auto</span>
+                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4"><path fill-rule="evenodd" d="M5.22 14.78a.75.75 0 0 1 0-1.06L11.94 7.5l.97.97-6.69 6.75a.75.75 0 0 1-1-.06ZM14 16.25a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z" clip-rule="evenodd"/></svg>
+                                    </div>
+                                    <div tabindex="0" class="dropdown-content z-10 menu w-44 rounded-box bg-base-100 p-2 shadow">
+                                        <li><a id="modeAuto" class="active">Automatic</a></li>
+                                        <li><a id="modeManual">Manual</a></li>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Auto-fire toggle (only visible in manual mode) -->
+                            <div id="autoFireRow" class="hidden flex items-center justify-between gap-2 rounded-box bg-base-100 p-2">
+                                <span class="text-sm">Auto-fire on detection</span>
+                                <input id="autoFireToggle" type="checkbox" class="toggle toggle-error" checked>
+                            </div>
+
+                            <!-- Auto-capture toggle (visible in both modes) -->
+                            <div class="flex items-center justify-between gap-2 rounded-box bg-base-100 p-2">
+                                <span class="text-sm">Auto-capture fire screenshots</span>
+                                <input id="captureToggle" type="checkbox" class="toggle toggle-primary" checked>
+                            </div>
+
+                            <!-- Movement pad -->
+                            <div class="grid grid-cols-3 gap-2">
+                                <div></div>
+                                <div class="grid place-items-center">
+                                    <button
+                                        id="btnUp"
+                                        class="btn btn-primary btn-lg btn-circle w-full max-w-16"
+                                        aria-label="Move up">
+                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="size-6"><path fill-rule="evenodd" d="M11.47 7.72a.75.75 0 0 1 1.06 0l7.5 7.5a.75.75 0 1 1-1.06 1.06L12 9.31l-6.97 6.97a.75.75 0 0 1-1.06-1.06l7.5-7.5Z" clip-rule="evenodd"/></svg>
+                                    </button>
+                                </div>
+                                <div></div>
+
+                                <div class="grid place-items-center">
+                                    <button
+                                        id="btnLeft"
+                                        class="btn btn-primary btn-lg btn-circle w-full max-w-16"
+                                        aria-label="Move left">
+                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="size-6"><path fill-rule="evenodd" d="M7.72 12.53a.75.75 0 0 1 0-1.06l7.5-7.5a.75.75 0 1 1 1.06 1.06L9.31 12l6.97 6.97a.75.75 0 1 1-1.06 1.06l-7.5-7.5Z" clip-rule="evenodd"/></svg>
+                                    </button>
+                                </div>
+                                <div class="grid place-items-center">
+                                    <button
+                                        id="btnShoot"
+                                        class="btn btn-error btn-lg btn-circle w-full max-w-16"
+                                        aria-label="Shoot">
+                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="size-6"><path d="M6 12a1 1 0 0 1 .293-.707l5-5a1 1 0 1 1 1.414 1.414L9.414 11H18a1 1 0 1 1 0 2H9.414l3.293 3.293a1 1 0 0 1-1.414 1.414l-5-5A1 1 0 0 1 6 12Z"/></svg>
+                                    </button>
+                                </div>
+                                <div class="grid place-items-center">
+                                    <button
+                                        id="btnRight"
+                                        class="btn btn-primary btn-lg btn-circle w-full max-w-16"
+                                        aria-label="Move right">
+                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="size-6"><path fill-rule="evenodd" d="M16.28 11.47a.75.75 0 0 1 0 1.06l-7.5 7.5a.75.75 0 0 1-1.06-1.06L14.69 12 7.72 5.03a.75.75 0 0 1 1.06-1.06l7.5 7.5Z" clip-rule="evenodd"/></svg>
+                                    </button>
+                                </div>
+
+                                <div></div>
+                                <div class="grid place-items-center">
+                                    <button
+                                        id="btnDown"
+                                        class="btn btn-primary btn-lg btn-circle w-full max-w-16"
+                                        aria-label="Move down">
+                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="size-6"><path fill-rule="evenodd" d="M12.53 16.28a.75.75 0 0 1-1.06 0l-7.5-7.5a.75.75 0 0 1 1.06-1.06L12 14.69l6.97-6.97a.75.75 0 1 1 1.06 1.06l-7.5 7.5Z" clip-rule="evenodd"/></svg>
+                                    </button>
+                                </div>
+                                <div></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Status panel -->
+                    <div class="card bg-base-200 shadow">
+                        <div class="card-body p-4">
+                            <h2 class="card-title text-sm uppercase tracking-wider opacity-70">
+                                Status
+                            </h2>
+
+                            <div class="stats stats-vertical shadow">
+                                <div class="stat">
+                                    <div class="stat-title">Pan (X)</div>
+                                    <div class="stat-value text-lg" id="statusX">--°</div>
+                                    <progress id="barX" class="progress progress-primary w-full" value="0" max="180"></progress>
+                                </div>
+                                <div class="stat">
+                                    <div class="stat-title">Tilt (Y)</div>
+                                    <div class="stat-value text-lg" id="statusY">--°</div>
+                                    <progress id="barY" class="progress progress-primary w-full" value="0" max="180"></progress>
+                                </div>
+                            </div>
+
+                            <div class="mt-2 flex flex-wrap gap-2">
+                                <span id="badgeMode" class="badge badge-outline">Auto mode</span>
+                                <span id="badgeFire" class="badge badge-outline">Fire: inactive</span>
+                            </div>
+
+                            <p id="statusHint" class="mt-1 text-xs opacity-60">
+                                Tip: use arrow keys to move, Space to shoot.
+                            </p>
+                        </div>
+                    </div>
+                </section>
+            </main>
+
+            <!-- Fire screenshot gallery -->
+            <section class="card bg-base-200 shadow">
+                <div class="card-body p-4">
+                    <div class="flex items-center justify-between">
+                        <h2 class="card-title text-sm uppercase tracking-wider opacity-70">
+                            Fire captures
+                        </h2>
+                        <div class="flex items-center gap-2">
+                            <span id="captureCount" class="text-xs opacity-60">0 saved</span>
+                            <button id="btnClearCaptures" class="btn btn-sm btn-outline btn-error normal-case">
+                                Clear all
+                            </button>
+                        </div>
+                    </div>
+                    <div id="captureGallery" class="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+                        <p id="captureEmpty" class="col-span-full py-4 text-center text-sm opacity-50">
+                            No fire captures yet.
+                        </p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Footer note -->
+            <footer class="text-center text-xs opacity-50">
+                Automatic mode scans continuously; switch to Manual to control the turret.
+            </footer>
+        </div>
+
+        <script type="module" src="/src/main.js"></script>
+    </body>
+</html>
