@@ -29,13 +29,9 @@ SCAN_Y_MAX = 110
 SCAN_CORNER_TOLERANCE = 10  # degrees of error allowed before a corner is "reached"
 SCAN_STATUS_POLL_INTERVAL = 0.1  # seconds between /api/status polls
 
-# Automatic fire tracking (center + wave while firing)
-# Converts a pixel offset of the fire from the frame center into servo degrees.
+# Automatic fire tracking (center on the fire while firing)
+# Converts a pixel offset of the fire center to servo degrees.
 FIRE_TRACK_PIXELS_PER_DEGREE_Y = 5.0
 # Fire is considered "centered" when its bbox center is within this many pixels
 # of the frame center; the turret stops moving once inside this deadzone.
 FIRE_TRACK_DEADBAND_PIXELS = 20
-# Up/down wave applied to the Y axis while firing (degrees, peak-to-peak).
-FIRE_WAVE_AMPLITUDE = 10.0
-# Full up/down wave cycle duration in seconds.
-FIRE_WAVE_PERIOD = 1.0
