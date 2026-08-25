@@ -1,3 +1,4 @@
+import math
 import os
 import threading
 import time
@@ -16,6 +17,10 @@ from config import (
     DASHBOARD_HOST,
     DASHBOARD_PORT,
     FIRE_CONF_THRESHOLD,
+    FIRE_TRACK_PIXELS_PER_DEGREE_X,
+    FIRE_TRACK_PIXELS_PER_DEGREE_Y,
+    FIRE_WAVE_AMPLITUDE,
+    FIRE_WAVE_PERIOD,
     MIN_FIRE_DURATION,
     SCAN_X_MAX,
     SCAN_X_MIN,
@@ -75,6 +80,21 @@ def get_status():
         return resp.json()
     except ValueError:
         return None
+
+
+def center_servos():
+    """Center both servos at (90, 90) on startup."""
+    # Stop any continuous movement left over from a previous session.
+    stop_all_movement()
+
+    status = get_status()
+
+    if status is None:
+        print("Could not read servo status; skipping centering.")
+        return
+
+    servo_get("/api/servo/x", {"angle": 90})
+    servo_get("/api/servo/y", {"angle": 90})
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +291,77 @@ class RoomScanner:
 # ---------------------------------------------------------------------------
 # Fire detection & control loop
 # ---------------------------------------------------------------------------
+def _clamp(value, low, high):
+    """Clamp `value` into the inclusive [low, high] range."""
+    return max(low, min(high, value))
+
+
+def track_fire(boxes, frame_shape, current_time, fire_start_time):
+    """Center the turret on the highest-confidence fire and wave Y while firing.
+
+    Only called in automatic mode while a fire is actively detected. Computes
+    the fire bbox center in pixels, converts its offset from the frame center
+    into servo degrees, and issues absolute /api/servo/x and /api/servo/y
+    commands. The Y target oscillates around the fire's vertical center using
+    a sine wave so the turret sweeps up and down while firing, while X keeps
+    tracking the fire horizontally.
+
+    Returns True if a fire was found and tracking commands were issued.
+    """
+    if boxes is None:
+        return False
+
+    # Pick the highest-confidence fire detection.
+    best = None
+    best_conf = 0.0
+    for box in boxes:
+        cls = int(box.cls[0])
+        conf = float(box.conf[0])
+        if cls == 0 and conf > FIRE_CONF_THRESHOLD and conf > best_conf:
+            best = box
+            best_conf = conf
+    if best is None:
+        return False
+
+    # Fire bbox center in pixels.
+    x1, y1, x2, y2 = (float(v) for v in best.xyxy[0])
+    fire_cx = (x1 + x2) / 2.0
+    fire_cy = (y1 + y2) / 2.0
+
+    # Frame center in pixels.
+    height, width = frame_shape[:2]
+    frame_cx = width / 2.0
+    frame_cy = height / 2.0
+
+    status = get_status()
+    if status is None:
+        return False
+    cur_x = status.get("x", 90)
+    cur_y = status.get("y", 90)
+
+    # Convert pixel offsets to servo degrees.
+    target_x = cur_x + (fire_cx - frame_cx) / FIRE_TRACK_PIXELS_PER_DEGREE_X
+    centered_y = cur_y + (fire_cy - frame_cy) / FIRE_TRACK_PIXELS_PER_DEGREE_Y
+
+    # Wave Y up/down around the fire's vertical center while firing.
+    if fire_start_time is not None:
+        elapsed = current_time - fire_start_time
+        wave = FIRE_WAVE_AMPLITUDE * math.sin(
+            2.0 * math.pi * elapsed / FIRE_WAVE_PERIOD
+        )
+    else:
+        wave = 0.0
+    target_y = centered_y + wave
+
+    # Clamp to the scan bounds so we never drive the servos past their limits.
+    target_x = _clamp(target_x, SCAN_X_MIN, SCAN_X_MAX)
+    target_y = _clamp(target_y, SCAN_Y_MIN, SCAN_Y_MAX)
+
+    servo_get("/api/servo/x", {"angle": target_x})
+    servo_get("/api/servo/y", {"angle": target_y})
+    return True
+
+
 def detection_loop(model, cap):
     global latest_frame, fire_active
 
@@ -336,6 +427,11 @@ def detection_loop(model, cap):
                 # Save a screenshot of the annotated frame on first detection.
                 if capture_on:
                     save_capture(annotated_frame)
+
+            # In automatic mode, center on the fire and wave Y up/down while
+            # firing. Manual mode keeps the old stop-and-fire-in-place behavior.
+            if auto:
+                track_fire(boxes, frame.shape, current_time, fire_start_time)
         else:
             if last_state == "fire":
                 if fire_start_time is not None and (current_time - fire_start_time) >= MIN_FIRE_DURATION:
@@ -548,6 +644,8 @@ def main():
         return
 
     print(f"Dashboard available at http://localhost:{DASHBOARD_PORT}")
+
+    center_servos()
 
     detection_thread = threading.Thread(
         target=detection_loop,
