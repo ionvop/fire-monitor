@@ -23,3 +23,12 @@ SCAN_Y_MIN = 70
 SCAN_Y_MAX = 110
 SCAN_CORNER_TOLERANCE = 10  # degrees of error allowed before a corner is "reached"
 SCAN_STATUS_POLL_INTERVAL = 0.1  # seconds between /api/status polls
+
+# Automatic fire tracking (center + wave while firing)
+# Converts a pixel offset of the fire from the frame center into servo degrees.
+FIRE_TRACK_PIXELS_PER_DEGREE_X = 5.0
+FIRE_TRACK_PIXELS_PER_DEGREE_Y = 5.0
+# Up/down wave applied to the Y axis while firing (degrees, peak-to-peak).
+FIRE_WAVE_AMPLITUDE = 10.0
+# Full up/down wave cycle duration in seconds.
+FIRE_WAVE_PERIOD = 1.0
