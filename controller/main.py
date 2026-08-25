@@ -17,7 +17,6 @@ from config import (
     DASHBOARD_PORT,
     DEBUG_DISABLE_TRIGGER,
     FIRE_CONF_THRESHOLD,
-    FIRE_TRACK_PIXELS_PER_DEGREE_Y,
     FIRE_TRACK_DEADBAND_PIXELS,
     MIN_FIRE_DURATION,
     SCAN_X_MAX,
@@ -350,6 +349,9 @@ def track_fire(boxes, frame_shape):
     # X axis: keep moving toward the fire horizontally while it is off-center.
     if abs(dx) > FIRE_TRACK_DEADBAND_PIXELS:
         direction = "right" if dx > 0 else "left"
+        opposite = "left" if direction == "right" else "right"
+        # Explicitly stop the opposite direction before starting the new one.
+        servo_get("/api/move", {"axis": "x", "dir": opposite, "cmd": "stop"})
         servo_get("/api/move", {"axis": "x", "dir": direction, "cmd": "start"})
     else:
         servo_get("/api/move", {"axis": "x", "dir": "left", "cmd": "stop"})
@@ -360,6 +362,9 @@ def track_fire(boxes, frame_shape):
     # down to follow it; dy < 0 means the fire is above, so tilt up.
     if abs(dy) > FIRE_TRACK_DEADBAND_PIXELS:
         direction = "down" if dy > 0 else "up"
+        opposite = "up" if direction == "down" else "down"
+        # Explicitly stop the opposite direction before starting the new one.
+        servo_get("/api/move", {"axis": "y", "dir": opposite, "cmd": "stop"})
         servo_get("/api/move", {"axis": "y", "dir": direction, "cmd": "start"})
     else:
         servo_get("/api/move", {"axis": "y", "dir": "up", "cmd": "stop"})
