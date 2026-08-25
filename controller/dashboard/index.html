@@ -42,6 +42,12 @@
                         </div>
                     </div>
 
+                    <!-- Crosshair overlay (toggleable, disabled by default) -->
+                    <div id="crosshair" class="hidden">
+                        <span class="crosshair-line crosshair-h"></span>
+                        <span class="crosshair-line crosshair-v"></span>
+                    </div>
+
                     <!-- Live badge over video -->
                     <span class="absolute right-3 top-3 badge badge-primary gap-1">
                         <span class="live-dot"></span>
@@ -82,6 +88,12 @@
                             <div class="flex items-center justify-between gap-2 rounded-box bg-base-100 p-2">
                                 <span class="text-sm">Auto-capture fire screenshots</span>
                                 <input id="captureToggle" type="checkbox" class="toggle toggle-primary" checked>
+                            </div>
+
+                            <!-- Crosshair toggle (visible in both modes) -->
+                            <div class="flex items-center justify-between gap-2 rounded-box bg-base-100 p-2">
+                                <span class="text-sm">Show crosshair</span>
+                                <input id="crosshairToggle" type="checkbox" class="toggle toggle-primary">
                             </div>
 
                             <!-- Movement pad -->
