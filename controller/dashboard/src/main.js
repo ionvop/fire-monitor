@@ -33,6 +33,10 @@ const captureEmpty = document.getElementById("captureEmpty");
 const captureCount = document.getElementById("captureCount");
 const btnClearCaptures = document.getElementById("btnClearCaptures");
 
+// Crosshair overlay elements
+const crosshair = document.getElementById("crosshair");
+const crosshairToggle = document.getElementById("crosshairToggle");
+
 // Client-side mirror of the turret mode, used to guard manual commands.
 let isAutoMode = true;
 
@@ -54,6 +58,9 @@ function initialize() {
     // Auto-capture toggle + gallery
     captureToggle.addEventListener("change", () => setCapture(captureToggle.checked));
     btnClearCaptures.addEventListener("click", clearCaptures);
+
+    // Crosshair toggle (disabled by default)
+    crosshairToggle.addEventListener("change", () => setCrosshair(crosshairToggle.checked));
 
     // Open a persistent connection so the controller knows a user
     // is connected and pauses automatic scanning.
@@ -198,6 +205,10 @@ function updateCapture(enabled) {
     if (captureToggle.checked !== isEnabled) {
         captureToggle.checked = isEnabled;
     }
+}
+
+function setCrosshair(enabled) {
+    crosshair.classList.toggle("hidden", !enabled);
 }
 
 function setCapture(enabled) {
