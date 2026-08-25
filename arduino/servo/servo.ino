@@ -193,8 +193,10 @@ void handleMove() {
 
   if (axis == "x") {
     if (dir == "left") {
+      moveRight = false;
       moveLeft = start;
     } else if (dir == "right") {
+      moveLeft = false;
       moveRight = start;
     } else {
       server.send(400, "text/plain", "Invalid dir. Use left or right");
@@ -202,8 +204,10 @@ void handleMove() {
     }
   } else if (axis == "y") {
     if (dir == "up") {
+      moveDown = false;
       moveUp = start;
     } else if (dir == "down") {
+      moveUp = false;
       moveDown = start;
     } else {
       server.send(400, "text/plain", "Invalid dir. Use up or down");
