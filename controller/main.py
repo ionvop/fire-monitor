@@ -356,8 +356,10 @@ def track_fire(boxes, frame_shape):
         servo_get("/api/move", {"axis": "x", "dir": "right", "cmd": "stop"})
 
     # Y axis: keep moving toward the fire vertically while it is off-center.
+    # dy > 0 means the fire is below the frame center, so the camera must tilt
+    # down to follow it; dy < 0 means the fire is above, so tilt up.
     if abs(dy) > FIRE_TRACK_DEADBAND_PIXELS:
-        direction = "up" if dy > 0 else "down"
+        direction = "down" if dy > 0 else "up"
         servo_get("/api/move", {"axis": "y", "dir": direction, "cmd": "start"})
     else:
         servo_get("/api/move", {"axis": "y", "dir": "up", "cmd": "stop"})
