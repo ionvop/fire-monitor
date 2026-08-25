@@ -455,6 +455,10 @@ def detection_loop(model, cap):
                 track_fire(boxes, frame.shape)
         else:
             if last_state == "fire":
+                # The fire is no longer detected. Stop any continuous tracking
+                # movement immediately so the turret doesn't keep drifting
+                # toward where the fire was before scanning resumes.
+                stop_all_movement()
                 if fire_start_time is not None and (current_time - fire_start_time) >= MIN_FIRE_DURATION:
                     servo_get("/api/servo/trigger", {"state": "retract"})
                     last_state = "retract"
