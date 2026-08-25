@@ -1,4 +1,3 @@
-import math
 import os
 import threading
 import time
@@ -20,8 +19,6 @@ from config import (
     FIRE_CONF_THRESHOLD,
     FIRE_TRACK_PIXELS_PER_DEGREE_Y,
     FIRE_TRACK_DEADBAND_PIXELS,
-    FIRE_WAVE_AMPLITUDE,
-    FIRE_WAVE_PERIOD,
     MIN_FIRE_DURATION,
     SCAN_X_MAX,
     SCAN_X_MIN,
@@ -305,17 +302,15 @@ class RoomScanner:
 # ---------------------------------------------------------------------------
 # Fire detection & control loop
 # ---------------------------------------------------------------------------
-def track_fire(boxes, frame_shape, current_time, fire_start_time):
-    """Continuously steer the turret toward the fire and wave Y while firing.
+def track_fire(boxes, frame_shape):
+    """Continuously steer the turret toward the fire while firing.
 
     Only called in automatic mode while a fire is actively detected. Computes
     the fire bbox center in pixels and its offset from the frame center. As
     long as the fire is outside the configured deadzone (FIRE_TRACK_DEADBAND_
     PIXELS), it issues continuous /api/move commands so the turret keeps
     moving toward the fire instead of jumping to an absolute angle. Once the
-    fire is within the deadzone on both axes, all movement stops. The Y axis
-    also oscillates around the fire's vertical center using a sine wave so the
-    turret sweeps up and down while firing.
+    fire is within the deadzone on both axes, all movement stops.
 
     Returns True if a fire was found and tracking commands were issued.
     """
@@ -347,18 +342,10 @@ def track_fire(boxes, frame_shape, current_time, fire_start_time):
     status = get_status()
     if status is None:
         return False
-    cur_x = status.get("x", 90)
-    cur_y = status.get("y", 90)
 
     # Pixel offset of the fire from the frame center.
     dx = fire_cx - frame_cx
     dy = fire_cy - frame_cy
-
-    # Once the fire is within the deadzone on both axes, stop and hold.
-    if (abs(dx) <= FIRE_TRACK_DEADBAND_PIXELS
-            and abs(dy) <= FIRE_TRACK_DEADBAND_PIXELS):
-        stop_all_movement()
-        return True
 
     # X axis: keep moving toward the fire horizontally while it is off-center.
     if abs(dx) > FIRE_TRACK_DEADBAND_PIXELS:
@@ -368,20 +355,9 @@ def track_fire(boxes, frame_shape, current_time, fire_start_time):
         servo_get("/api/move", {"axis": "x", "dir": "left", "cmd": "stop"})
         servo_get("/api/move", {"axis": "x", "dir": "right", "cmd": "stop"})
 
-    # Y axis: convert the vertical offset to degrees and add the wave, then
-    # move up/down toward the resulting target while the fire is off-center.
-    centered_y = cur_y + dy / FIRE_TRACK_PIXELS_PER_DEGREE_Y
-    if fire_start_time is not None:
-        elapsed = current_time - fire_start_time
-        wave = FIRE_WAVE_AMPLITUDE * math.sin(
-            2.0 * math.pi * elapsed / FIRE_WAVE_PERIOD
-        )
-    else:
-        wave = 0.0
-    target_y = centered_y + wave
-
+    # Y axis: keep moving toward the fire vertically while it is off-center.
     if abs(dy) > FIRE_TRACK_DEADBAND_PIXELS:
-        direction = "up" if target_y > cur_y else "down"
+        direction = "up" if dy > 0 else "down"
         servo_get("/api/move", {"axis": "y", "dir": direction, "cmd": "start"})
     else:
         servo_get("/api/move", {"axis": "y", "dir": "up", "cmd": "stop"})
@@ -456,10 +432,10 @@ def detection_loop(model, cap):
                 if capture_on:
                     save_capture(annotated_frame)
 
-            # In automatic mode, center on the fire and wave Y up/down while
-            # firing. Manual mode keeps the old stop-and-fire-in-place behavior.
+            # In automatic mode, center on the fire while firing. Manual mode
+            # keeps the old stop-and-fire-in-place behavior.
             if auto:
-                track_fire(boxes, frame.shape, current_time, fire_start_time)
+                track_fire(boxes, frame.shape)
         else:
             if last_state == "fire":
                 if fire_start_time is not None and (current_time - fire_start_time) >= MIN_FIRE_DURATION:
