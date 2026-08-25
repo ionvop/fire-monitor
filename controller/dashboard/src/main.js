@@ -15,6 +15,7 @@ const barX = document.getElementById("barX");
 const barY = document.getElementById("barY");
 const fireAlert = document.getElementById("fireAlert");
 const badgeMode = document.getElementById("badgeMode");
+const badgeScan = document.getElementById("badgeScan");
 const badgeFire = document.getElementById("badgeFire");
 const connStatus = document.getElementById("connStatus");
 
@@ -96,6 +97,7 @@ function pollStatus() {
             updateFire(data.fire_active);
             updateMode(data.auto_mode, data.auto_fire);
             updateCapture(data.capture_enabled);
+            updateScanDirection(data.scan_direction, data.auto_mode, data.fire_active);
         })
         .catch((err) => console.error("Status poll failed:", err));
 }
@@ -115,6 +117,24 @@ function updateFire(active) {
     badgeFire.classList.toggle("badge-error", !!active);
     badgeFire.classList.toggle("badge-outline", !active);
     if (active) badgeFire.classList.toggle("badge-outline", false);
+}
+
+function updateScanDirection(direction, auto, fireActive) {
+    // Only meaningful while the scanner is actively sweeping: automatic mode
+    // and no fire currently being tracked/fired.
+    const scanning = auto !== false && !fireActive;
+    const labels = {
+        up: "↑ Up",
+        right: "→ Right",
+        down: "↓ Down",
+        left: "← Left",
+    };
+
+    badgeScan.textContent = scanning && labels[direction]
+        ? `Scan: ${labels[direction]}`
+        : "Scan: —";
+    badgeScan.classList.toggle("badge-primary", scanning && !!labels[direction]);
+    badgeScan.classList.toggle("badge-outline", !(scanning && !!labels[direction]));
 }
 
 function updateMode(auto, autoFire) {
