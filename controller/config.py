@@ -4,7 +4,7 @@ MIN_FIRE_DURATION = 1.0
 # Debug safety switch: when True, the physical trigger is never fired, neither
 # from automatic fire-on-detection nor from the manual dashboard trigger. The
 # safe "retract" state still works. Set to False for normal operation.
-DEBUG_DISABLE_TRIGGER = True
+DEBUG_DISABLE_TRIGGER = False
 
 # Webcam
 WEBCAM_INDEX = 1
