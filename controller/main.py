@@ -16,9 +16,10 @@ from config import (
     CAPTURE_MAX,
     DASHBOARD_HOST,
     DASHBOARD_PORT,
+    DEBUG_DISABLE_TRIGGER,
     FIRE_CONF_THRESHOLD,
-    FIRE_TRACK_PIXELS_PER_DEGREE_X,
     FIRE_TRACK_PIXELS_PER_DEGREE_Y,
+    FIRE_TRACK_DEADBAND_PIXELS,
     FIRE_WAVE_AMPLITUDE,
     FIRE_WAVE_PERIOD,
     MIN_FIRE_DURATION,
@@ -69,6 +70,19 @@ def stop_all_movement():
                 "/api/move",
                 {"axis": axis, "dir": direction, "cmd": "stop"},
             )
+
+
+def fire_trigger():
+    """Fire the physical trigger, unless disabled by the debug config.
+
+    When DEBUG_DISABLE_TRIGGER is True, the trigger is never fired (used for
+    debugging detection/tracking without the turret actually firing). The safe
+    "retract" state is unaffected.
+    """
+    if DEBUG_DISABLE_TRIGGER:
+        print("DEBUG_DISABLE_TRIGGER is set; skipping trigger fire.")
+        return
+    servo_get("/api/servo/trigger", {"state": "fire"})
 
 
 def get_status():
@@ -291,20 +305,17 @@ class RoomScanner:
 # ---------------------------------------------------------------------------
 # Fire detection & control loop
 # ---------------------------------------------------------------------------
-def _clamp(value, low, high):
-    """Clamp `value` into the inclusive [low, high] range."""
-    return max(low, min(high, value))
-
-
 def track_fire(boxes, frame_shape, current_time, fire_start_time):
-    """Center the turret on the highest-confidence fire and wave Y while firing.
+    """Continuously steer the turret toward the fire and wave Y while firing.
 
     Only called in automatic mode while a fire is actively detected. Computes
-    the fire bbox center in pixels, converts its offset from the frame center
-    into servo degrees, and issues absolute /api/servo/x and /api/servo/y
-    commands. The Y target oscillates around the fire's vertical center using
-    a sine wave so the turret sweeps up and down while firing, while X keeps
-    tracking the fire horizontally.
+    the fire bbox center in pixels and its offset from the frame center. As
+    long as the fire is outside the configured deadzone (FIRE_TRACK_DEADBAND_
+    PIXELS), it issues continuous /api/move commands so the turret keeps
+    moving toward the fire instead of jumping to an absolute angle. Once the
+    fire is within the deadzone on both axes, all movement stops. The Y axis
+    also oscillates around the fire's vertical center using a sine wave so the
+    turret sweeps up and down while firing.
 
     Returns True if a fire was found and tracking commands were issued.
     """
@@ -339,11 +350,27 @@ def track_fire(boxes, frame_shape, current_time, fire_start_time):
     cur_x = status.get("x", 90)
     cur_y = status.get("y", 90)
 
-    # Convert pixel offsets to servo degrees.
-    target_x = cur_x + (fire_cx - frame_cx) / FIRE_TRACK_PIXELS_PER_DEGREE_X
-    centered_y = cur_y + (fire_cy - frame_cy) / FIRE_TRACK_PIXELS_PER_DEGREE_Y
+    # Pixel offset of the fire from the frame center.
+    dx = fire_cx - frame_cx
+    dy = fire_cy - frame_cy
 
-    # Wave Y up/down around the fire's vertical center while firing.
+    # Once the fire is within the deadzone on both axes, stop and hold.
+    if (abs(dx) <= FIRE_TRACK_DEADBAND_PIXELS
+            and abs(dy) <= FIRE_TRACK_DEADBAND_PIXELS):
+        stop_all_movement()
+        return True
+
+    # X axis: keep moving toward the fire horizontally while it is off-center.
+    if abs(dx) > FIRE_TRACK_DEADBAND_PIXELS:
+        direction = "right" if dx > 0 else "left"
+        servo_get("/api/move", {"axis": "x", "dir": direction, "cmd": "start"})
+    else:
+        servo_get("/api/move", {"axis": "x", "dir": "left", "cmd": "stop"})
+        servo_get("/api/move", {"axis": "x", "dir": "right", "cmd": "stop"})
+
+    # Y axis: convert the vertical offset to degrees and add the wave, then
+    # move up/down toward the resulting target while the fire is off-center.
+    centered_y = cur_y + dy / FIRE_TRACK_PIXELS_PER_DEGREE_Y
     if fire_start_time is not None:
         elapsed = current_time - fire_start_time
         wave = FIRE_WAVE_AMPLITUDE * math.sin(
@@ -353,12 +380,13 @@ def track_fire(boxes, frame_shape, current_time, fire_start_time):
         wave = 0.0
     target_y = centered_y + wave
 
-    # Clamp to the scan bounds so we never drive the servos past their limits.
-    target_x = _clamp(target_x, SCAN_X_MIN, SCAN_X_MAX)
-    target_y = _clamp(target_y, SCAN_Y_MIN, SCAN_Y_MAX)
+    if abs(dy) > FIRE_TRACK_DEADBAND_PIXELS:
+        direction = "up" if target_y > cur_y else "down"
+        servo_get("/api/move", {"axis": "y", "dir": direction, "cmd": "start"})
+    else:
+        servo_get("/api/move", {"axis": "y", "dir": "up", "cmd": "stop"})
+        servo_get("/api/move", {"axis": "y", "dir": "down", "cmd": "stop"})
 
-    servo_get("/api/servo/x", {"angle": target_x})
-    servo_get("/api/servo/y", {"angle": target_y})
     return True
 
 
@@ -419,7 +447,7 @@ def detection_loop(model, cap):
         if fire_detected and (auto or auto_fire_enabled):
             if last_state != "fire":
                 scanner.stop()
-                servo_get("/api/servo/trigger", {"state": "fire"})
+                fire_trigger()
                 fire_start_time = current_time
                 last_state = "fire"
                 with state_lock:
@@ -517,6 +545,8 @@ def api_trigger():
     with state_lock:
         if auto_mode:
             return jsonify({"error": "Turret is in automatic mode. Manual controls are disabled."}), 403
+    if state == "fire" and DEBUG_DISABLE_TRIGGER:
+        return jsonify({"error": "Trigger firing is disabled by DEBUG_DISABLE_TRIGGER."}), 403
     resp = servo_get("/api/servo/trigger", {"state": state})
     if resp is None:
         return jsonify({"error": "Servo controller unreachable"}), 502
