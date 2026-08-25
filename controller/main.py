@@ -232,6 +232,11 @@ class RoomScanner:
         self._x_moving = False
         self._y_moving = False
 
+    @property
+    def direction(self):
+        """The current scan direction: 'up', 'right', 'down', or 'left'."""
+        return ("up", "right", "down", "left")[self._direction_index]
+
     def _set_x(self, direction):
         """Start moving X in `direction` (or stop if None)."""
         if direction is None:
@@ -296,6 +301,11 @@ class RoomScanner:
         else:                               # left
             self._set_x("left")
             self._set_y(None)
+
+
+# The automatic room scanner. Created at module scope so the web server thread
+# can read its current direction for the dashboard indicator.
+scanner = RoomScanner()
 
 
 # ---------------------------------------------------------------------------
@@ -374,7 +384,7 @@ def track_fire(boxes, frame_shape):
 
 
 def detection_loop(model, cap):
-    global latest_frame, fire_active
+    global latest_frame, fire_active, scanner
 
     scanner = RoomScanner()
     last_state = None
@@ -501,6 +511,7 @@ def api_status():
         status["auto_fire"] = auto_fire
         status["fire_active"] = fire_active
         status["capture_enabled"] = capture_enabled
+        status["scan_direction"] = scanner.direction
     return jsonify(status)
 
 
