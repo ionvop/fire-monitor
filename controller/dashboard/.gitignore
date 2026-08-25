@@ -1,7 +1,2 @@
-<<<<<<< Updated upstream
 node_modules/
 dist/
-=======
-*
-!.gitignore
->>>>>>> Stashed changes
