@@ -2,15 +2,15 @@ SERVO_IP = "192.168.4.1"
 MIN_FIRE_DURATION = 1.0
 
 # Debug safety switch: when True, the physical trigger is never fired, neither
-# from automatic fire-on-detection nor from the manual dashboard trigger. The
+# from automatic fire-on-detection nor from the manual dashboard trigger. Theq
 # safe "retract" state still works. Set to False for normal operation.
-DEBUG_DISABLE_TRIGGER = False
+DEBUG_DISABLE_TRIGGER = True
 
 # Webcam
-WEBCAM_INDEX = 1
+WEBCAM_INDEX = 0
 
 # Fire detection
-FIRE_CONF_THRESHOLD = 0.5
+FIRE_CONF_THRESHOLD = 0.7
 
 # Fire screenshot auto-capture
 CAPTURE_DIR = "captures"          # directory (gitignored) for saved fire screenshots
