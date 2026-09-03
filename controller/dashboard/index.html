@@ -96,6 +96,16 @@
                                 <input id="crosshairToggle" type="checkbox" class="toggle toggle-primary">
                             </div>
 
+                            <!-- Detection sensitivity (fire confidence threshold) -->
+                            <div class="flex items-center justify-between gap-2 rounded-box bg-base-100 p-2">
+                                <span class="text-sm">Detection sensitivity</span>
+                                <select id="thresholdSelect" class="select select-sm select-bordered">
+                                    <option value="0.85">High (0.85)</option>
+                                    <option value="0.7">Medium (0.7)</option>
+                                    <option value="0.6">Low (0.6)</option>
+                                </select>
+                            </div>
+
                             <!-- Movement pad -->
                             <div class="grid grid-cols-3 gap-2">
                                 <div></div>
