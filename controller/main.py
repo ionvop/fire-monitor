@@ -46,6 +46,12 @@ auto_fire = False            # Auto-fire on detection (only relevant in manual m
 fire_active = False          # True while the trigger is firing
 capture_enabled = CAPTURE_ENABLED_DEFAULT  # Auto-save fire screenshots
 
+# Fire detection confidence threshold. Seeded from config on startup and
+# adjustable at runtime from the dashboard. Only these preset values are
+# accepted by the /api/threshold route.
+FIRE_CONF_PRESETS = {"high": 0.85, "medium": 0.7, "low": 0.6}
+fire_conf_threshold = FIRE_CONF_THRESHOLD
+
 
 # ---------------------------------------------------------------------------
 # Servo controller helpers
@@ -326,13 +332,16 @@ def track_fire(boxes, frame_shape):
     if boxes is None:
         return False
 
+    with state_lock:
+        threshold = fire_conf_threshold
+
     # Pick the highest-confidence fire detection.
     best = None
     best_conf = 0.0
     for box in boxes:
         cls = int(box.cls[0])
         conf = float(box.conf[0])
-        if cls == 0 and conf > FIRE_CONF_THRESHOLD and conf > best_conf:
+        if cls == 0 and conf > threshold and conf > best_conf:
             best = box
             best_conf = conf
     if best is None:
@@ -421,10 +430,12 @@ def detection_loop(model, cap):
         fire_detected = False
         boxes = results[0].boxes
         if boxes is not None:
+            with state_lock:
+                threshold = fire_conf_threshold
             for box in boxes:
                 cls = int(box.cls[0])
                 conf = float(box.conf[0])
-                if cls == 0 and conf > FIRE_CONF_THRESHOLD:
+                if cls == 0 and conf > threshold:
                     fire_detected = True
                     break
 
@@ -515,6 +526,7 @@ def api_status():
         status["auto_fire"] = auto_fire
         status["fire_active"] = fire_active
         status["capture_enabled"] = capture_enabled
+        status["fire_conf_threshold"] = fire_conf_threshold
         status["scan_direction"] = scanner.direction
     return jsonify(status)
 
@@ -625,6 +637,28 @@ def api_capture_toggle():
     with state_lock:
         capture_enabled = enabled
     return jsonify({"enabled": capture_enabled})
+
+
+@app.route("/api/threshold", methods=["POST"])
+def api_threshold():
+    """Set the fire detection confidence threshold.
+
+    Only the preset values in FIRE_CONF_PRESETS are accepted.
+
+    JSON body:
+        {"threshold": 0.85 | 0.7 | 0.6}
+    """
+    global fire_conf_threshold
+    data = request.get_json(silent=True) or {}
+    threshold = data.get("threshold")
+    if not isinstance(threshold, (int, float)) or isinstance(threshold, bool):
+        return jsonify({"error": "threshold must be a number"}), 400
+    threshold = float(threshold)
+    if threshold not in FIRE_CONF_PRESETS.values():
+        return jsonify({"error": "threshold must be one of the preset values"}), 400
+    with state_lock:
+        fire_conf_threshold = threshold
+    return jsonify({"threshold": fire_conf_threshold})
 
 
 @app.route("/api/captures")
