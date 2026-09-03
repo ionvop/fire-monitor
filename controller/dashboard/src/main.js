@@ -37,6 +37,9 @@ const btnClearCaptures = document.getElementById("btnClearCaptures");
 const crosshair = document.getElementById("crosshair");
 const crosshairToggle = document.getElementById("crosshairToggle");
 
+// Detection sensitivity (fire confidence threshold)
+const thresholdSelect = document.getElementById("thresholdSelect");
+
 // Client-side mirror of the turret mode, used to guard manual commands.
 let isAutoMode = true;
 
@@ -61,6 +64,9 @@ function initialize() {
 
     // Crosshair toggle (disabled by default)
     crosshairToggle.addEventListener("change", () => setCrosshair(crosshairToggle.checked));
+
+    // Detection sensitivity
+    thresholdSelect.addEventListener("change", () => setThreshold(Number(thresholdSelect.value)));
 
     // Open a persistent connection so the controller knows a user
     // is connected and pauses automatic scanning.
@@ -104,6 +110,7 @@ function pollStatus() {
             updateFire(data.fire_active);
             updateMode(data.auto_mode, data.auto_fire);
             updateCapture(data.capture_enabled);
+            updateThreshold(data.fire_conf_threshold);
             updateScanDirection(data.scan_direction, data.auto_mode, data.fire_active);
         })
         .catch((err) => console.error("Status poll failed:", err));
@@ -209,6 +216,39 @@ function updateCapture(enabled) {
 
 function setCrosshair(enabled) {
     crosshair.classList.toggle("hidden", !enabled);
+}
+
+function updateThreshold(value) {
+    // Match the current threshold to the closest preset option.
+    const presets = [0.85, 0.7, 0.6];
+    const target = Number(value);
+    let best = presets[0];
+    let bestDiff = Infinity;
+    for (const p of presets) {
+        const diff = Math.abs(p - target);
+        if (diff < bestDiff) {
+            bestDiff = diff;
+            best = p;
+        }
+    }
+    const selected = String(best);
+    if (thresholdSelect.value !== selected) {
+        thresholdSelect.value = selected;
+    }
+}
+
+function setThreshold(value) {
+    fetch("/api/threshold", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ threshold: value }),
+    })
+        .then((res) => res.json())
+        .then((data) => {
+            updateThreshold(data.threshold);
+            console.log("Detection threshold set to", data.threshold);
+        })
+        .catch((err) => console.error("Failed to set detection threshold:", err));
 }
 
 function setCapture(enabled) {
