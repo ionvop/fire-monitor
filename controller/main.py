@@ -4,7 +4,9 @@ import time
 from datetime import datetime
 
 import cv2
+import firebase_admin
 import requests
+from firebase_admin import credentials, firestore
 from flask import Flask, Response, jsonify, request, send_from_directory
 from flask_socketio import SocketIO
 from ultralytics import YOLO
@@ -16,6 +18,7 @@ from config import (
     DASHBOARD_HOST,
     DASHBOARD_PORT,
     DEBUG_DISABLE_TRIGGER,
+    FIRE_ALERT_COOLDOWN_SECONDS,
     FIRE_CONF_THRESHOLD,
     FIRE_TRACK_DEADBAND_PIXELS,
     MIN_FIRE_DURATION,
@@ -51,6 +54,69 @@ capture_enabled = CAPTURE_ENABLED_DEFAULT  # Auto-save fire screenshots
 # accepted by the /api/threshold route.
 FIRE_CONF_PRESETS = {"high": 0.85, "medium": 0.7, "low": 0.6}
 fire_conf_threshold = FIRE_CONF_THRESHOLD
+
+# Firebase Firestore client for fire alerts. Initialized in main(); stays None
+# if the service-account key is missing so the controller still runs.
+db = None
+# Monotonic timestamp of the last "detected" alert sent, used to enforce the
+# cooldown. 0.0 means "never sent" so the first detection always alerts.
+last_detected_alert_time = 0.0
+
+
+# ---------------------------------------------------------------------------
+# Firebase fire alerts
+# ---------------------------------------------------------------------------
+def init_firebase():
+    """Initialize the Firebase Admin SDK and return the Firestore client.
+
+    Returns the Firestore client, or None if the service-account key is
+    missing or initialization fails (the controller keeps running without
+    alerts in that case).
+    """
+    global db
+    key_file = "fire-monitor-316a5-firebase-adminsdk-fbsvc-097e88fe31.json"
+    if not os.path.isfile(key_file):
+        print(f"Firebase service-account key not found ({key_file}); alerts disabled.")
+        db = None
+        return None
+    try:
+        cred = credentials.Certificate(key_file)
+        firebase_admin.initialize_app(cred)
+        db = firestore.client()
+        print("Firebase initialized; fire alerts enabled.")
+        return db
+    except Exception as exc:
+        print(f"Firebase initialization failed; alerts disabled: {exc}")
+        db = None
+        return None
+
+
+def send_fire_alert(status, confidence=None, x=None, y=None):
+    """Write a fire alert document to the Firestore 'alerts' collection.
+
+    status is "detected" or "retracted". Optional confidence/x/y are included
+    only when provided. No-op (with a log) if Firebase is unavailable.
+    """
+    if db is None:
+        print("Firebase unavailable; skipping fire alert.")
+        return False
+    doc = {
+        "timestamp": firestore.SERVER_TIMESTAMP,
+        "status": status,
+    }
+    if confidence is not None:
+        doc["confidence"] = float(confidence)
+    if x is not None:
+        doc["x"] = float(x)
+    if y is not None:
+        doc["y"] = float(y)
+    try:
+        db.collection("alerts").add(doc)
+        print(f"Fire alert sent: status={status}")
+        return True
+    except Exception as exc:
+        print(f"Failed to send fire alert ({status}): {exc}")
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -459,6 +525,24 @@ def detection_loop(model, cap):
                 # Save a screenshot of the annotated frame on first detection.
                 if capture_on:
                     save_capture(annotated_frame)
+                # Send a "detected" alert to Firestore, gated by the cooldown.
+                global last_detected_alert_time
+                if current_time - last_detected_alert_time >= FIRE_ALERT_COOLDOWN_SECONDS:
+                    best_conf = 0.0
+                    if boxes is not None:
+                        for box in boxes:
+                            if int(box.cls[0]) == 0:
+                                best_conf = max(best_conf, float(box.conf[0]))
+                    status = get_status()
+                    x_angle = status.get("x") if status else None
+                    y_angle = status.get("y") if status else None
+                    if send_fire_alert(
+                        "detected",
+                        confidence=best_conf,
+                        x=x_angle,
+                        y=y_angle,
+                    ):
+                        last_detected_alert_time = current_time
 
             # In automatic mode, center on the fire while firing. Manual mode
             # keeps the old stop-and-fire-in-place behavior.
@@ -476,6 +560,9 @@ def detection_loop(model, cap):
                     fire_start_time = None
                     with state_lock:
                         fire_active = False
+                    # Send the matching "retracted" alert (no cooldown gate) so
+                    # the app can resolve the active alert.
+                    send_fire_alert("retracted")
             elif last_state != "retract":
                 servo_get("/api/servo/trigger", {"state": "retract"})
                 last_state = "retract"
@@ -708,6 +795,9 @@ def main():
     print(f"Dashboard available at http://localhost:{DASHBOARD_PORT}")
 
     center_servos()
+
+    # Initialize Firebase before the detection loop so alerts can be written.
+    init_firebase()
 
     detection_thread = threading.Thread(
         target=detection_loop,

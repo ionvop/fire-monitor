@@ -17,6 +17,11 @@ CAPTURE_DIR = "captures"          # directory (gitignored) for saved fire screen
 CAPTURE_MAX = 50                  # keep at most this many captures (oldest removed)
 CAPTURE_ENABLED_DEFAULT = True    # initial state of the auto-capture toggle
 
+# Firebase fire alerts
+# Minimum seconds between "detected" alerts sent to Firestore. The matching
+# "retracted" alert is always sent so the app can resolve the active alert.
+FIRE_ALERT_COOLDOWN_SECONDS = 3600  # 1 hour
+
 # Dashboard server
 DASHBOARD_HOST = "0.0.0.0"
 DASHBOARD_PORT = 5000
