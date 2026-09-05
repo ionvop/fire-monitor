@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -26,7 +28,7 @@ const String kNotificationChannelId = 'fire_alerts';
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   final alertId = message.data['alertId'];
-  print('Background message handled: alertId=$alertId');
+  developer.log('Background message handled: alertId=$alertId');
 }
 
 /// Local-notifications plugin used to show an in-app banner while the
@@ -66,7 +68,7 @@ Future<void> main() async {
   // Request permission (iOS shows a prompt; on Android 13+ this requests
   // POST_NOTIFICATIONS).
   final settings = await messaging.requestPermission();
-  print('Notification permission: ${settings.authorizationStatus}');
+  developer.log('Notification permission: ${settings.authorizationStatus}');
 
   // Initialize local notifications for in-app banners while foregrounded.
   await _initLocalNotifications();
