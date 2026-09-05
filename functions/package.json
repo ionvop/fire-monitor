@@ -2,7 +2,7 @@
   "name": "functions",
   "description": "Firebase Cloud Functions for fire-monitor push notifications",
   "engines": {
-    "node": "18"
+    "node": "20"
   },
   "main": "index.js",
   "private": true,
