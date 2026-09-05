@@ -97,13 +97,17 @@
                             </div>
 
                             <!-- Detection sensitivity (fire confidence threshold) -->
-                            <div class="flex items-center justify-between gap-2 rounded-box bg-base-100 p-2">
-                                <span class="text-sm">Detection sensitivity</span>
-                                <select id="thresholdSelect" class="select select-sm select-bordered">
-                                    <option value="0.85">High (0.85)</option>
-                                    <option value="0.7">Medium (0.7)</option>
-                                    <option value="0.6">Low (0.6)</option>
-                                </select>
+                            <div class="flex flex-col gap-1 rounded-box bg-base-100 p-2">
+                                <div class="flex items-center justify-between gap-2">
+                                    <span class="text-sm">Detection sensitivity</span>
+                                    <span id="thresholdValue" class="badge badge-outline badge-sm">Medium</span>
+                                </div>
+                                <input id="thresholdSlider" type="range" min="0" max="2" step="1" value="1" class="range range-primary range-sm" aria-label="Detection sensitivity">
+                                <div class="flex justify-between text-xs opacity-60 px-1">
+                                    <span>High</span>
+                                    <span>Medium</span>
+                                    <span>Low</span>
+                                </div>
                             </div>
 
                             <!-- Movement pad -->
