@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'firebase_options.dart';
 
@@ -14,11 +16,61 @@ const String kAlertsCollection = 'alerts';
 /// are shown first.
 const int kMaxAlerts = 50;
 
+/// Must match the `android.channelId` used by the Cloud Function so local
+/// notifications show on a high-importance channel on Android 8+.
+const String kNotificationChannelId = 'fire_alerts';
+
+/// Called when a push notification is received while the app is terminated or
+/// in the background. Must be a top-level function (not a closure) so it can
+/// run in the background isolate.
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  final alertId = message.data['alertId'];
+  print('Background message handled: alertId=$alertId');
+}
+
+/// Local-notifications plugin used to show an in-app banner while the
+/// foreground and to register the Android notification channel.
+final FlutterLocalNotificationsPlugin _localNotifications =
+    FlutterLocalNotificationsPlugin();
+
+Future<void> _initLocalNotifications() async {
+  const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+  const initSettings = InitializationSettings(android: androidInit);
+  await _localNotifications.initialize(initSettings);
+
+  const androidChannel = AndroidNotificationChannel(
+    kNotificationChannelId,
+    'Fire Alerts',
+    description: 'Notifications when a fire is detected',
+    importance: Importance.high,
+  );
+  await _localNotifications
+      .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>()
+      ?.createNotificationChannel(androidChannel);
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  final messaging = FirebaseMessaging.instance;
+
+  // Register the background handler before messaging is used.
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+  // Request permission (iOS shows a prompt; on Android 13+ this requests
+  // POST_NOTIFICATIONS).
+  final settings = await messaging.requestPermission();
+  print('Notification permission: ${settings.authorizationStatus}');
+
+  // Initialize local notifications for in-app banners while foregrounded.
+  await _initLocalNotifications();
+
   runApp(const FireMonitorApp());
 }
 
