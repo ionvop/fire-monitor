@@ -1,0 +1,13 @@
+{
+  "name": "functions",
+  "description": "Firebase Cloud Functions for fire-monitor push notifications",
+  "engines": {
+    "node": "18"
+  },
+  "main": "index.js",
+  "private": true,
+  "dependencies": {
+    "firebase-admin": "^12.0.0",
+    "firebase-functions": "^5.0.0"
+  }
+}
