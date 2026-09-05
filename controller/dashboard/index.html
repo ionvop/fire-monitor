@@ -64,17 +64,10 @@
                                 <h2 class="card-title text-sm uppercase tracking-wider opacity-70">
                                     Turret controls
                                 </h2>
-                                <!-- Mode toggle: automatic vs manual -->
-                                <div class="dropdown dropdown-end">
-                                    <div tabindex="0" role="button"
-                                         class="btn btn-sm btn-outline gap-2 normal-case">
-                                        <span id="modeToggleLabel" class="font-semibold">Auto</span>
-                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4"><path fill-rule="evenodd" d="M5.22 14.78a.75.75 0 0 1 0-1.06L11.94 7.5l.97.97-6.69 6.75a.75.75 0 0 1-1-.06ZM14 16.25a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z" clip-rule="evenodd"/></svg>
-                                    </div>
-                                    <div tabindex="0" class="dropdown-content z-10 menu w-44 rounded-box bg-base-100 p-2 shadow">
-                                        <li><a id="modeAuto" class="active">Automatic</a></li>
-                                        <li><a id="modeManual">Manual</a></li>
-                                    </div>
+                                <!-- Mode toggle: automatic vs manual (ON = auto, OFF = manual) -->
+                                <div class="flex items-center justify-between gap-2 rounded-box bg-base-100 p-2 w-40">
+                                    <span class="text-sm">Auto mode</span>
+                                    <input id="modeToggle" type="checkbox" class="toggle toggle-primary" checked aria-label="Auto mode">
                                 </div>
                             </div>
 
