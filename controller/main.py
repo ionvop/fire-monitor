@@ -1,4 +1,5 @@
 import os
+import queue
 import threading
 import time
 from datetime import datetime
@@ -91,11 +92,20 @@ def init_firebase():
         return None
 
 
-def send_fire_alert(status, confidence=None, x=None, y=None):
-    """Write a fire alert document to the Firestore 'alerts' collection.
+# Alert documents to be written to Firestore. The detection loop enqueues
+# alerts here (fast, non-blocking) and a dedicated sender thread performs the
+# actual network write, so a slow/hung internet connection can never freeze
+# turret tracking/centering or delay the retract command.
+alert_queue = queue.Queue()
+
+
+def queue_fire_alert(status, confidence=None, x=None, y=None):
+    """Enqueue a fire alert document for background delivery to Firestore.
 
     status is "detected" or "retracted". Optional confidence/x/y are included
-    only when provided. No-op (with a log) if Firebase is unavailable.
+    only when provided. The actual network write happens on a dedicated sender
+    thread (queue_fire_alert returns immediately). No-op (with a log) if
+    Firebase is unavailable.
     """
     if db is None:
         print("Firebase unavailable; skipping fire alert.")
@@ -110,13 +120,26 @@ def send_fire_alert(status, confidence=None, x=None, y=None):
         doc["x"] = float(x)
     if y is not None:
         doc["y"] = float(y)
-    try:
-        db.collection("alerts").add(doc)
-        print(f"Fire alert sent: status={status}")
-        return True
-    except Exception as exc:
-        print(f"Failed to send fire alert ({status}): {exc}")
-        return False
+    alert_queue.put(doc)
+    print(f"Fire alert queued: status={status}")
+    return True
+
+
+def _alert_sender():
+    """Background thread that writes queued alerts to Firestore.
+
+    Runs until the process exits. A failed write is logged and the loop keeps
+    going so transient internet drops don't kill alert delivery.
+    """
+    while True:
+        doc = alert_queue.get()
+        try:
+            db.collection("alerts").add(doc)
+            print(f"Fire alert sent: status={doc.get('status')}")
+        except Exception as exc:
+            print(f"Failed to send fire alert ({doc.get('status')}): {exc}")
+        finally:
+            alert_queue.task_done()
 
 
 # ---------------------------------------------------------------------------
@@ -526,8 +549,15 @@ def detection_loop(model, cap):
                 if capture_on:
                     save_capture(annotated_frame)
                 # Send a "detected" alert to Firestore, gated by the cooldown.
+                # The enqueue is non-blocking; the network write happens on a
+                # background thread so the turret keeps tracking while it sends.
                 global last_detected_alert_time
-                if current_time - last_detected_alert_time >= FIRE_ALERT_COOLDOWN_SECONDS:
+                with state_lock:
+                    cooldown_elapsed = (
+                        current_time - last_detected_alert_time
+                        >= FIRE_ALERT_COOLDOWN_SECONDS
+                    )
+                if cooldown_elapsed:
                     best_conf = 0.0
                     if boxes is not None:
                         for box in boxes:
@@ -536,12 +566,13 @@ def detection_loop(model, cap):
                     status = get_status()
                     x_angle = status.get("x") if status else None
                     y_angle = status.get("y") if status else None
-                    if send_fire_alert(
+                    queue_fire_alert(
                         "detected",
                         confidence=best_conf,
                         x=x_angle,
                         y=y_angle,
-                    ):
+                    )
+                    with state_lock:
                         last_detected_alert_time = current_time
 
             # In automatic mode, center on the fire while firing. Manual mode
@@ -561,8 +592,9 @@ def detection_loop(model, cap):
                     with state_lock:
                         fire_active = False
                     # Send the matching "retracted" alert (no cooldown gate) so
-                    # the app can resolve the active alert.
-                    send_fire_alert("retracted")
+                    # the app can resolve the active alert. Non-blocking: the
+                    # write happens on the background sender thread.
+                    queue_fire_alert("retracted")
             elif last_state != "retract":
                 servo_get("/api/servo/trigger", {"state": "retract"})
                 last_state = "retract"
@@ -798,6 +830,10 @@ def main():
 
     # Initialize Firebase before the detection loop so alerts can be written.
     init_firebase()
+
+    # Background thread that drains the alert queue so the detection loop never
+    # blocks on Firestore network writes.
+    threading.Thread(target=_alert_sender, daemon=True).start()
 
     detection_thread = threading.Thread(
         target=detection_loop,
