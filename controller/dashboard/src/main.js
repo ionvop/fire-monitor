@@ -38,7 +38,11 @@ const crosshair = document.getElementById("crosshair");
 const crosshairToggle = document.getElementById("crosshairToggle");
 
 // Detection sensitivity (fire confidence threshold)
-const thresholdSelect = document.getElementById("thresholdSelect");
+// Slider snaps across three presets, indexed 0..2 (High, Medium, Low).
+const THRESHOLD_PRESETS = [0.85, 0.7, 0.6];
+const THRESHOLD_LABELS = ["High", "Medium", "Low"];
+const thresholdSlider = document.getElementById("thresholdSlider");
+const thresholdValue = document.getElementById("thresholdValue");
 
 // Client-side mirror of the turret mode, used to guard manual commands.
 let isAutoMode = true;
@@ -65,8 +69,11 @@ function initialize() {
     // Crosshair toggle (disabled by default)
     crosshairToggle.addEventListener("change", () => setCrosshair(crosshairToggle.checked));
 
-    // Detection sensitivity
-    thresholdSelect.addEventListener("change", () => setThreshold(Number(thresholdSelect.value)));
+    // Detection sensitivity — applied on release ("change", not "input").
+    thresholdSlider.addEventListener("change", () => {
+        const idx = Number(thresholdSlider.value);
+        setThreshold(THRESHOLD_PRESETS[idx]);
+    });
 
     // Open a persistent connection so the controller knows a user
     // is connected and pauses automatic scanning.
@@ -219,21 +226,23 @@ function setCrosshair(enabled) {
 }
 
 function updateThreshold(value) {
-    // Match the current threshold to the closest preset option.
-    const presets = [0.85, 0.7, 0.6];
+    // Match the current threshold to the closest preset and move the slider.
     const target = Number(value);
-    let best = presets[0];
+    let bestIdx = 0;
     let bestDiff = Infinity;
-    for (const p of presets) {
-        const diff = Math.abs(p - target);
+    for (let i = 0; i < THRESHOLD_PRESETS.length; i++) {
+        const diff = Math.abs(THRESHOLD_PRESETS[i] - target);
         if (diff < bestDiff) {
             bestDiff = diff;
-            best = p;
+            bestIdx = i;
         }
     }
-    const selected = String(best);
-    if (thresholdSelect.value !== selected) {
-        thresholdSelect.value = selected;
+    if (Number(thresholdSlider.value) !== bestIdx) {
+        thresholdSlider.value = String(bestIdx);
+    }
+    const label = THRESHOLD_LABELS[bestIdx];
+    if (thresholdValue.textContent !== label) {
+        thresholdValue.textContent = label;
     }
 }
 
