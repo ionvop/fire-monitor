@@ -19,10 +19,8 @@ const badgeScan = document.getElementById("badgeScan");
 const badgeFire = document.getElementById("badgeFire");
 const connStatus = document.getElementById("connStatus");
 
-// Mode toggle elements
-const modeToggleLabel = document.getElementById("modeToggleLabel");
-const modeAuto = document.getElementById("modeAuto");
-const modeManual = document.getElementById("modeManual");
+// Mode toggle element (ON = auto, OFF = manual)
+const modeToggle = document.getElementById("modeToggle");
 const autoFireRow = document.getElementById("autoFireRow");
 const autoFireToggle = document.getElementById("autoFireToggle");
 
@@ -57,9 +55,8 @@ function initialize() {
     attachButton(btnRight, "right");
     attachButton(btnShoot, "shoot");
 
-    // Mode toggles
-    modeAuto.addEventListener("click", () => setMode("auto"));
-    modeManual.addEventListener("click", () => setMode("manual"));
+    // Mode toggle
+    modeToggle.addEventListener("change", () => setMode(modeToggle.checked ? "auto" : "manual"));
     autoFireToggle.addEventListener("change", () => setAutoFire(autoFireToggle.checked));
 
     // Auto-capture toggle + gallery
@@ -163,13 +160,11 @@ function updateMode(auto, autoFire) {
     const isAutoFire = autoFire !== false;
     isAutoMode = isAuto;
 
-    // Mode badge + dropdown label.
-    modeToggleLabel.textContent = isAuto ? "Auto" : "Manual";
+    // Mode toggle + badge.
+    modeToggle.checked = isAuto;
     badgeMode.textContent = isAuto ? "Auto mode" : "Manual mode";
     badgeMode.classList.toggle("badge-primary", !isAuto);
     badgeMode.classList.toggle("badge-outline", isAuto);
-    modeAuto.classList.toggle("active", isAuto);
-    modeManual.classList.toggle("active", !isAuto);
 
     // Auto-fire toggle only visible in manual mode.
     autoFireRow.classList.toggle("hidden", isAuto);
