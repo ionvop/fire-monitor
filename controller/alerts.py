@@ -20,6 +20,7 @@ All network failures are non-fatal — the detection loop must keep running even
 if the remote API is unreachable.
 """
 
+import json
 import threading
 import time
 
@@ -104,7 +105,7 @@ def send_push(title: str, body: str, data: dict | None = None) -> None:
         return
 
     try:
-        from pywebpush import WebPushException, WebPusher
+        from pywebpush import WebPushException, webpush
     except ImportError:
         print("pywebpush is not installed; skipping push notification.")
         return
@@ -128,10 +129,14 @@ def send_push(title: str, body: str, data: dict | None = None) -> None:
             },
         }
         try:
-            WebPusher(subscription_info).send(
-                data=payload,
+            webpush(
+                subscription_info=subscription_info,
+                data=json.dumps(payload),
                 vapid_private_key=VAPID_PRIVATE_KEY,
-                vapid_claims={"sub": VAPID_CLAIMS_EMAIL},
+                # VAPID requires the "sub" claim to be a mailto: link.
+                vapid_claims={
+                    "sub": f"mailto:{VAPID_CLAIMS_EMAIL}",
+                },
             )
             print(f"Push sent to {endpoint}")
         except WebPushException as exc:
