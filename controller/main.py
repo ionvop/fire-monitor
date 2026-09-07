@@ -27,6 +27,7 @@ from config import (
     SERVO_IP,
     WEBCAM_INDEX,
 )
+from alerts import report_fire
 
 SERVO_BASE_URL = f"http://{SERVO_IP}"
 DASHBOARD_DIR = "dashboard"
@@ -428,6 +429,7 @@ def detection_loop(model, cap):
             latest_frame = jpeg.tobytes()
 
         fire_detected = False
+        best_conf = 0.0
         boxes = results[0].boxes
         if boxes is not None:
             with state_lock:
@@ -437,7 +439,8 @@ def detection_loop(model, cap):
                 conf = float(box.conf[0])
                 if cls == 0 and conf > threshold:
                     fire_detected = True
-                    break
+                    if conf > best_conf:
+                        best_conf = conf
 
         with state_lock:
             auto = auto_mode
@@ -459,6 +462,15 @@ def detection_loop(model, cap):
                 # Save a screenshot of the annotated frame on first detection.
                 if capture_on:
                     save_capture(annotated_frame)
+                # Report the detection to the remote backend (logs to
+                # fire_history and pushes to subscribers, subject to cooldown).
+                status = get_status()
+                report_fire(
+                    "detected",
+                    best_conf,
+                    status.get("x") if status else None,
+                    status.get("y") if status else None,
+                )
 
             # In automatic mode, center on the fire while firing. Manual mode
             # keeps the old stop-and-fire-in-place behavior.
@@ -476,6 +488,8 @@ def detection_loop(model, cap):
                     fire_start_time = None
                     with state_lock:
                         fire_active = False
+                    # Report the retraction so the PWA marks the alert resolved.
+                    report_fire("retracted", best_conf, None, None)
             elif last_state != "retract":
                 servo_get("/api/servo/trigger", {"state": "retract"})
                 last_state = "retract"
