@@ -307,10 +307,6 @@ def report_fire(status: str, confidence: float, x: float, y: float,
 - **`capture_image_url`:** optional URL of the annotated capture image. The
   controller already saves screenshots to `controller/captures/` — if those are
   served over HTTP(S), pass their URL here.
-- **Idempotency / cooldown:** the controller's `config.py` already has a
-  `FIRE_ALERT_COOLDOWN_SECONDS` concept for Firestore alerts. Apply the same
-  idea here: send `"detected"` at most once per cooldown window, and always
-  send the matching `"retracted"` so the app can resolve the active alert.
 - **Errors:** a non-`2xx` response returns `{ "message": "..." }`. Treat
   network failures as non-fatal — the detection loop should keep running.
 
