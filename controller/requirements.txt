@@ -4,4 +4,3 @@ numpy
 flask
 flask-socketio
 eventlet
-firebase-admin
