@@ -16,7 +16,7 @@
  *    approach:
  *      - GET  -> used for reading (list all tasks, or a single task by ?id=).
  *      - POST -> used for everything else. The real HTTP verb is carried in a
- *                hidden form field named `_method` (e.g. `_method=PUT` or
+ *                JSON body field named `_method` (e.g. `_method=PUT` or
  *                `_method=DELETE`), and the server dispatches on that value.
  *
  * The JSON body is read once from php://input into $data, and the outer switch
@@ -63,8 +63,8 @@ switch ($_SERVER["REQUEST_METHOD"]) {
         exit;
     case "POST":
         // Inner switch: since PUT/DELETE are blocked by InfinityFree, the real
-        // verb is tunneled through the `_method` form field sent with the POST.
-        switch ($_POST["_method"]) {
+        // verb is tunneled through the `_method` field in the JSON body.
+        switch ($data["_method"]) {
             case "POST":
                 executePreparedQuery($db, <<<SQL
                     INSERT INTO `todos` (`task`) VALUES (:task)
