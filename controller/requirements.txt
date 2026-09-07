@@ -4,3 +4,5 @@ numpy
 flask
 flask-socketio
 eventlet
+python-dotenv
+pywebpush
