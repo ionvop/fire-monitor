@@ -4,13 +4,11 @@ Reads the 8x8 pixel temperature grid from an AMG8833 (Panasonic Grid-EYE)
 thermal camera over I2C and reports the temperature of the hottest pixel in
 real time.
 
-On Windows (or any machine without an I2C bus / smbus2), the script falls back
-to a built-in simulator so the output format and hot-pixel detection can be
-tested without hardware.
+Exits with an error if no AMG8833 hardware is detected (no I2C bus, no
+smbus2, or no device at the expected address).
 
 Usage:
     python amg8833_test.py                 # real hardware (Linux/Raspberry Pi)
-    python amg8833_test.py --simulate      # force the simulator
     python amg8833_test.py --interval 0.5  # update every 0.5 s
 """
 
@@ -59,33 +57,6 @@ class AMG8833:
             pass
 
 
-class SimulatedAMG8833:
-    """Synthetic AMG8833 for testing without hardware.
-
-    Produces an 8x8 grid with a warm background and a hot spot that drifts
-    around the grid so hot-pixel detection can be verified in real time.
-    """
-
-    def __init__(self):
-        self._t = 0.0
-
-    def read_grid(self):
-        self._t += 0.25
-        # Warm background (~24 C) with a little noise.
-        rng = np.random.default_rng()
-        grid = 24.0 + rng.normal(0.0, 0.3, (GRID_SIZE, GRID_SIZE))
-        # Hot spot orbiting the grid.
-        cx = 3.5 + 3.0 * np.cos(self._t)
-        cy = 3.5 + 3.0 * np.sin(self._t)
-        rows, cols = np.mgrid[0:GRID_SIZE, 0:GRID_SIZE]
-        dist = np.sqrt((rows - cy) ** 2 + (cols - cx) ** 2)
-        grid += 45.0 * np.exp(-(dist ** 2) / 2.0)
-        return grid.astype(np.float32)
-
-    def close(self):
-        pass
-
-
 def find_hottest_pixel(grid):
     """Return (max_temp, row, col) of the hottest pixel in the grid."""
     flat_index = int(np.argmax(grid))
@@ -105,23 +76,16 @@ def print_grid(grid, hot_row, hot_col):
 
 
 def build_sensor(args):
-    """Return a working sensor, preferring real hardware unless forced off."""
-    if args.simulate:
-        print("Using SIMULATOR (--simulate).")
-        return SimulatedAMG8833()
-
+    """Return a working AMG8833 sensor, or raise if no hardware is found."""
     try:
         sensor = AMG8833(bus_number=args.i2c_bus)
-        print(f"Using real AMG8833 on I2C bus {args.i2c_bus}.")
-        return sensor
     except Exception as exc:
-        print(
-            f"Could not open AMG8833 on I2C bus {args.i2c_bus} ({exc}).\n"
-            "Falling back to the built-in simulator. "
-            "On Windows there is no native I2C bus; run on a Raspberry Pi "
-            "with smbus2 installed for real readings."
-        )
-        return SimulatedAMG8833()
+        raise RuntimeError(
+            f"No AMG8833 hardware detected on I2C bus {args.i2c_bus}: {exc}. "
+            "Check that the sensor is wired to I2C and that smbus2 is installed."
+        ) from exc
+    print(f"Using real AMG8833 on I2C bus {args.i2c_bus}.")
+    return sensor
 
 
 def parse_args(argv=None):
@@ -140,17 +104,16 @@ def parse_args(argv=None):
         default=1,
         help="I2C bus number (default: 1, typical on Raspberry Pi).",
     )
-    parser.add_argument(
-        "--simulate",
-        action="store_true",
-        help="Force the simulator instead of real hardware.",
-    )
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(argv)
-    sensor = build_sensor(args)
+    try:
+        sensor = build_sensor(args)
+    except RuntimeError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
 
     print("Reading AMG8833 hot-pixel temperature. Press Ctrl+C to stop.\n")
     try:
