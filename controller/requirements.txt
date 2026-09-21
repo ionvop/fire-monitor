@@ -6,3 +6,5 @@ flask-socketio
 eventlet
 python-dotenv
 pywebpush
+smbus2
+pyserial
