@@ -25,9 +25,15 @@ from config import (
     SCAN_Y_MIN,
     SCAN_CORNER_TOLERANCE,
     SERVO_IP,
+    THERMAL_ENABLED,
+    THERMAL_FAIL_OPEN,
+    THERMAL_SERIAL_BAUD,
+    THERMAL_SERIAL_PORT,
+    THERMAL_THRESHOLD_C,
     WEBCAM_INDEX,
 )
 from alerts import report_fire
+from thermal import ThermalSensor
 
 SERVO_BASE_URL = f"http://{SERVO_IP}"
 DASHBOARD_DIR = "dashboard"
@@ -52,6 +58,12 @@ capture_enabled = CAPTURE_ENABLED_DEFAULT  # Auto-save fire screenshots
 # accepted by the /api/threshold route.
 FIRE_CONF_PRESETS = {"high": 0.85, "medium": 0.7, "low": 0.6}
 fire_conf_threshold = FIRE_CONF_THRESHOLD
+
+# Latest AMG8833 thermal reading, shared between the detection thread and the
+# web server. max_temp_c is the hottest pixel temperature (None if unavailable
+# or stale); thermal_ok is whether it clears the configured threshold.
+thermal_max_temp_c = None
+thermal_ok = False
 
 
 # ---------------------------------------------------------------------------
@@ -393,8 +405,8 @@ def track_fire(boxes, frame_shape):
     return True
 
 
-def detection_loop(model, cap):
-    global latest_frame, fire_active, scanner
+def detection_loop(model, cap, thermal_sensor=None):
+    global latest_frame, fire_active, scanner, thermal_max_temp_c, thermal_ok
 
     scanner = RoomScanner()
     last_state = None
@@ -447,11 +459,24 @@ def detection_loop(model, cap):
             auto_fire_enabled = auto_fire
             capture_on = capture_enabled
 
+        # Read the AMG8833 thermal verdict. When THERMAL_ENABLED, the hottest
+        # pixel must clear the threshold for the trigger to fire. The latest
+        # reading is also published to the dashboard via /api/status.
+        thermal_pass = True
+        if thermal_sensor is not None:
+            max_temp_c, ok = thermal_sensor.read()
+            with state_lock:
+                thermal_max_temp_c = max_temp_c
+                thermal_ok = ok
+            if THERMAL_ENABLED:
+                thermal_pass = ok
+
         current_time = time.monotonic()
 
         # Automatic fire-on-detection. In automatic mode it is always enabled;
-        # in manual mode it follows the auto_fire toggle.
-        if fire_detected and (auto or auto_fire_enabled):
+        # in manual mode it follows the auto_fire toggle. When THERMAL_ENABLED,
+        # the thermal verdict must also pass before the trigger fires.
+        if fire_detected and thermal_pass and (auto or auto_fire_enabled):
             if last_state != "fire":
                 scanner.stop()
                 fire_trigger()
@@ -542,6 +567,10 @@ def api_status():
         status["capture_enabled"] = capture_enabled
         status["fire_conf_threshold"] = fire_conf_threshold
         status["scan_direction"] = scanner.direction
+        status["thermal_enabled"] = THERMAL_ENABLED
+        status["thermal_threshold_c"] = THERMAL_THRESHOLD_C
+        status["max_temp_c"] = thermal_max_temp_c
+        status["thermal_ok"] = thermal_ok
     return jsonify(status)
 
 
@@ -721,11 +750,25 @@ def main():
 
     print(f"Dashboard available at http://localhost:{DASHBOARD_PORT}")
 
+    # AMG8833 thermal verification layer. If the sensor can't be opened, the
+    # controller still boots and thermal_ok follows THERMAL_FAIL_OPEN.
+    thermal_sensor = ThermalSensor(
+        port=THERMAL_SERIAL_PORT,
+        baud=THERMAL_SERIAL_BAUD,
+        threshold_c=THERMAL_THRESHOLD_C,
+        fail_open=THERMAL_FAIL_OPEN,
+    )
+    if not thermal_sensor.available:
+        print(
+            "Thermal sensor unavailable; "
+            f"fail-open={THERMAL_FAIL_OPEN}, enabled={THERMAL_ENABLED}"
+        )
+
     center_servos()
 
     detection_thread = threading.Thread(
         target=detection_loop,
-        args=(model, cap),
+        args=(model, cap, thermal_sensor),
         daemon=True,
     )
     detection_thread.start()
@@ -741,6 +784,7 @@ def main():
     finally:
         stop_all_movement()
         servo_get("/api/servo/trigger", {"state": "retract"})
+        thermal_sensor.close()
         cap.release()
 
 
