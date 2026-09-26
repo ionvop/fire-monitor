@@ -17,6 +17,7 @@ const fireAlert = document.getElementById("fireAlert");
 const badgeMode = document.getElementById("badgeMode");
 const badgeScan = document.getElementById("badgeScan");
 const badgeFire = document.getElementById("badgeFire");
+const badgeThermal = document.getElementById("badgeThermal");
 const connStatus = document.getElementById("connStatus");
 
 // Mode toggle element (ON = auto, OFF = manual)
@@ -116,6 +117,7 @@ function pollStatus() {
             updateCapture(data.capture_enabled);
             updateThreshold(data.fire_conf_threshold);
             updateScanDirection(data.scan_direction, data.auto_mode, data.fire_active);
+            updateThermal(data.max_temp_c, data.thermal_ok, data.thermal_enabled);
         })
         .catch((err) => console.error("Status poll failed:", err));
 }
@@ -135,6 +137,24 @@ function updateFire(active) {
     badgeFire.classList.toggle("badge-error", !!active);
     badgeFire.classList.toggle("badge-outline", !active);
     if (active) badgeFire.classList.toggle("badge-outline", false);
+}
+
+function updateThermal(maxTempC, thermalOk, enabled) {
+    // When the thermal layer is disabled, show it as inactive rather than
+    // implying a reading is available.
+    if (enabled === false) {
+        badgeThermal.textContent = "Thermal: off";
+        badgeThermal.classList.remove("badge-success", "badge-error");
+        badgeThermal.classList.add("badge-outline");
+        return;
+    }
+
+    const temp = Number.isFinite(maxTempC) ? `${maxTempC.toFixed(1)}°C` : "—";
+    const ok = thermalOk === true;
+    badgeThermal.textContent = `Thermal: ${temp} ${ok ? "OK" : "LOW"}`;
+    badgeThermal.classList.toggle("badge-success", ok);
+    badgeThermal.classList.toggle("badge-error", !ok);
+    badgeThermal.classList.toggle("badge-outline", false);
 }
 
 function updateScanDirection(direction, auto, fireActive) {
