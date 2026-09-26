@@ -21,7 +21,7 @@ connected, or pyserial not installed).
 import argparse
 import sys
 
-DEFAULT_PORT = "COM3"
+DEFAULT_PORT = "COM5"
 DEFAULT_BAUD = 115200
 
 # Prefix the Arduino sketch uses for hot-pixel lines. Any other line (boot
