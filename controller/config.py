@@ -23,6 +23,20 @@ WEBCAM_INDEX = 0
 # Fire detection
 FIRE_CONF_THRESHOLD = 0.7
 
+# AMG8833 thermal verification layer
+# The AMG8833 (via the Arduino serial bridge) provides a second verification
+# layer: before the trigger fires, the hottest detected pixel must also exceed
+# THERMAL_THRESHOLD_C. When THERMAL_ENABLED is True, BOTH the YOLO confidence
+# threshold AND the thermal threshold must pass.
+THERMAL_ENABLED = True
+THERMAL_THRESHOLD_C = 50.0
+THERMAL_SERIAL_PORT = "COM5"
+THERMAL_SERIAL_BAUD = 115200
+# When the thermal sensor is unavailable (serial open failure or no fresh
+# reading), THERMAL_FAIL_OPEN=True lets detection proceed (fail-open); False
+# blocks firing (fail-closed).
+THERMAL_FAIL_OPEN = True
+
 # Fire screenshot auto-capture
 CAPTURE_DIR = "captures"          # directory (gitignored) for saved fire screenshots
 CAPTURE_MAX = 50                  # keep at most this many captures (oldest removed)
