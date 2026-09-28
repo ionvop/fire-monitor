@@ -9,7 +9,7 @@ This project is an **AI-powered Fire Extinguishing Turret system**. It uses a **
 The project is divided into three main components:
 
 1. **Arduino (Firmware):**
-    * **Servo:** An ESP32 that controls two servos (Pan/Tilt) and two digital pins for a firing/retracting mechanism. It runs a web server to receive movement and firing commands.
+    * **Servo:** An ESP32 that controls two servos (Pan/Tilt) and two digital pins for a firing/retracting mechanism. It also reads the **AMG8833 thermal camera** over I2C and exposes the hottest pixel via `/api/thermal`. It runs a web server (on its own access point) to receive movement/firing commands and serve thermal readings.
 
 2. **Controller (AI Brain):** A Python script running YOLOv8. It captures video from a **webcam**, detects fire, scans the room by driving the servo's movement endpoints, and sends logic commands to the Servo controller. It also serves the dashboard and proxies manual-control commands.
 
@@ -41,12 +41,23 @@ The project is divided into three main components:
 * **Servo Controller:** ESP32.
 * **Servos:** 2x Servos connected to Pins 12 (Y) and 13 (X).
 * **Trigger:** Relays or MOSFETs connected to Pins 26 (Fire) and 27 (Retract).
+* **Thermal Camera:** AMG8833 (Panasonic Grid-EYE) wired to the ESP32 over I2C:
+
+| AMG8833 | ESP32 | Notes |
+| --- | --- | --- |
+| VIN | **3V3** | The AMG8833 is a 3.3V part — do **not** use 5V |
+| GND | GND | |
+| SDA | GPIO21 | ESP32 default I2C SDA |
+| SCL | GPIO22 | ESP32 default I2C SCL |
+| INT | — | Not connected |
+
+The controller reaches the ESP32 (and its thermal endpoint) over the ESP32's access point (`ESP32-Turret`, `192.168.4.1`), so no USB serial connection is required.
 
 ### 2. Firmware Installation (Arduino)
 
 1. Navigate to the `arduino/` folder.
 2. Open `arduino/servo/servo.ino`, select your ESP32 board, and upload.
-* *Note:* You will need the `ESP32Servo` library installed in your Arduino IDE.
+* *Note:* You will need the `ESP32Servo` library, plus `Adafruit AMG88xx` and `Adafruit BusIO` (all via Library Manager), installed in your Arduino IDE.
 
 ### 3. AI Controller Setup (Python)
 
@@ -85,6 +96,11 @@ All behavior is configured in `controller/config.py`:
 | `MIN_FIRE_DURATION` | `1.0` | Seconds the trigger stays in the `fire` state before retracting. |
 | `WEBCAM_INDEX` | `0` | Index of the webcam used for video capture. |
 | `FIRE_CONF_THRESHOLD` | `0.5` | Minimum confidence for a detection to count as fire. |
+| `THERMAL_ENABLED` | `True` | Require the thermal threshold to pass before firing. |
+| `THERMAL_THRESHOLD_C` | `50.0` | Hottest-pixel temperature (°C) required to fire. |
+| `THERMAL_POLL_INTERVAL` | `0.2` | Seconds between `/api/thermal` polls. |
+| `THERMAL_HTTP_TIMEOUT` | `1.0` | Per-request HTTP timeout when polling the thermal endpoint. |
+| `THERMAL_FAIL_OPEN` | `True` | If the sensor is unavailable, allow firing (`True`) or block it (`False`). |
 | `DASHBOARD_HOST` | `0.0.0.0` | Host the dashboard server binds to. |
 | `DASHBOARD_PORT` | `5000` | Port the dashboard server listens on. |
 | `SCAN_X_MIN` / `SCAN_X_MAX` | `0` / `180` | Pan (X) sweep limits in degrees. |
@@ -118,6 +134,7 @@ The Servo ESP32 exposes the following endpoints for integration:
 | Endpoint | Parameters | Description |
 | --- | --- | --- |
 | `/api/status` | — | Returns current `x`, `y`, and `trigger` angles as JSON. |
+| `/api/thermal` | — | Returns the hottest AMG8833 pixel: `{"ok":true,"max_temp_c":<f>,"row":<r>,"col":<c>}` (or `{"ok":false,"error":"..."}`). |
 | `/api/move` | `axis=x/y`, `dir=left/right/up/down`, `cmd=start/stop` | Continuous movement control. |
 | `/api/servo/trigger` | `state=fire/retract` | Activates `fire()` or `retract()`. |
 | `/api/servo/x` | `angle=0-180` | Sets the X (pan) angle. |
