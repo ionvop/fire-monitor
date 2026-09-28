@@ -24,15 +24,18 @@ WEBCAM_INDEX = 0
 FIRE_CONF_THRESHOLD = 0.7
 
 # AMG8833 thermal verification layer
-# The AMG8833 (via the Arduino serial bridge) provides a second verification
-# layer: before the trigger fires, the hottest detected pixel must also exceed
+# The AMG8833 is wired directly to the servo ESP32 over I2C and exposed at
+# http://<SERVO_IP>/api/thermal. It provides a second verification layer:
+# before the trigger fires, the hottest detected pixel must also exceed
 # THERMAL_THRESHOLD_C. When THERMAL_ENABLED is True, BOTH the YOLO confidence
 # threshold AND the thermal threshold must pass.
 THERMAL_ENABLED = True
 THERMAL_THRESHOLD_C = 50.0
-THERMAL_SERIAL_PORT = "COM5"
-THERMAL_SERIAL_BAUD = 115200
-# When the thermal sensor is unavailable (serial open failure or no fresh
+# How often the controller polls the ESP32 /api/thermal endpoint (seconds).
+THERMAL_POLL_INTERVAL = 0.2
+# Per-request HTTP timeout when polling the thermal endpoint (seconds).
+THERMAL_HTTP_TIMEOUT = 1.0
+# When the thermal sensor is unavailable (endpoint unreachable or no fresh
 # reading), THERMAL_FAIL_OPEN=True lets detection proceed (fail-open); False
 # blocks firing (fail-closed).
 THERMAL_FAIL_OPEN = True
