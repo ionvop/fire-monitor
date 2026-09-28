@@ -1,130 +1,110 @@
-"""Real-time AMG8833 hot-pixel temperature test (Arduino Uno over serial).
+"""Real-time AMG8833 hot-pixel temperature test (ESP32 over HTTP).
 
-The AMG8833 (Panasonic Grid-EYE) thermal camera is wired to an Arduino Uno
-(VIN=5V, GND=GND, SCL=A5, SDA=A4). The Uno reads the 8x8 pixel grid, finds the
-hottest pixel, and streams it over USB serial as:
+The AMG8833 (Panasonic Grid-EYE) thermal camera is wired directly to the servo
+ESP32 over I2C (VIN=3V3, GND=GND, SDA=GPIO21, SCL=GPIO22). The ESP32 reads the
+8x8 pixel grid, finds the hottest pixel, and exposes it over its access-point
+HTTP server as:
 
-    HOT,<temp_c>,<row>,<col>
+    GET http://<SERVO_IP>/api/thermal
+    -> {"ok":true,"max_temp_c":<float>,"row":<int>,"col":<int>}
 
-This script opens that serial port, parses each line, and prints the
-temperature of the hottest pixel in real time.
+This script polls that endpoint and prints the temperature of the hottest pixel
+in real time.
 
 Usage:
-    python amg8833_test.py                       # COM3 @ 115200
-    python amg8833_test.py --port COM5           # different port
-    python amg8833_test.py --port COM3 --baud 9600
+    python amg8833_test.py                       # 192.168.4.1
+    python amg8833_test.py --ip 192.168.4.1      # explicit ESP32 IP
+    python amg8833_test.py --interval 0.5        # slower polling
 
-Exits with an error if the serial port cannot be opened (wrong port, board not
-connected, or pyserial not installed).
+Exits with an error if the endpoint cannot be reached (wrong IP, ESP32 not
+powered, or not connected to the ESP32 access point).
 """
 
 import argparse
 import sys
+import time
 
-DEFAULT_PORT = "COM5"
-DEFAULT_BAUD = 115200
+import requests
 
-# Prefix the Arduino sketch uses for hot-pixel lines. Any other line (boot
-# banner, error text) is ignored.
-HOT_PREFIX = "HOT,"
+DEFAULT_IP = "192.168.4.1"
+DEFAULT_INTERVAL = 0.2
+DEFAULT_TIMEOUT = 1.0
 
 
-def parse_hot_line(line):
-    """Parse a 'HOT,<temp>,<row>,<col>' line.
+def parse_thermal_response(payload):
+    """Parse a /api/thermal JSON payload.
 
-    Returns (temp, row, col) as (float, int, int), or None if the line is not
-    a valid hot-pixel line.
+    Returns (temp, row, col) as (float, int, int), or None if the payload does
+    not represent a valid reading.
     """
-    if not line.startswith(HOT_PREFIX):
-        return None
-    parts = line.split(",")
-    if len(parts) != 4:
+    if not isinstance(payload, dict) or not payload.get("ok"):
         return None
     try:
-        temp = float(parts[1])
-        row = int(parts[2])
-        col = int(parts[3])
-    except ValueError:
+        temp = float(payload["max_temp_c"])
+        row = int(payload["row"])
+        col = int(payload["col"])
+    except (KeyError, TypeError, ValueError):
         return None
     return temp, row, col
 
 
-def open_serial(port, baud):
-    """Open the serial port, or raise RuntimeError with a helpful message."""
-    try:
-        import serial
-    except ImportError as exc:
-        raise RuntimeError(
-            "pyserial is not installed. Run: pip install pyserial"
-        ) from exc
-
-    try:
-        return serial.Serial(port=port, baudrate=baud, timeout=1)
-    except serial.SerialException as exc:
-        raise RuntimeError(
-            f"Could not open serial port {port} at {baud} baud: {exc}. "
-            "Check that the Arduino is connected and the port is correct "
-            "(Arduino IDE > Tools > Port)."
-        ) from exc
-
-
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(
-        description="Read the hottest pixel temperature of an AMG8833 via an "
-        "Arduino Uno over serial."
+        description="Read the hottest pixel temperature of an AMG8833 via the "
+        "servo ESP32 HTTP API."
     )
     parser.add_argument(
-        "--port",
-        default=DEFAULT_PORT,
-        help=f"Serial port of the Arduino (default: {DEFAULT_PORT}).",
+        "--ip",
+        default=DEFAULT_IP,
+        help=f"IP address of the servo ESP32 (default: {DEFAULT_IP}).",
     )
     parser.add_argument(
-        "--baud",
-        type=int,
-        default=DEFAULT_BAUD,
-        help=f"Serial baud rate (default: {DEFAULT_BAUD}).",
+        "--interval",
+        type=float,
+        default=DEFAULT_INTERVAL,
+        help=f"Seconds between polls (default: {DEFAULT_INTERVAL}).",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=DEFAULT_TIMEOUT,
+        help=f"Per-request HTTP timeout in seconds (default: {DEFAULT_TIMEOUT}).",
     )
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(argv)
+    url = f"http://{args.ip}/api/thermal"
 
-    try:
-        ser = open_serial(args.port, args.baud)
-    except RuntimeError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
-
-    print(f"Reading AMG8833 hot-pixel temperature from {args.port} "
-          f"at {args.baud} baud. Press Ctrl+C to stop.\n")
+    print(f"Reading AMG8833 hot-pixel temperature from {url}. "
+          "Press Ctrl+C to stop.\n")
     try:
         while True:
-            raw = ser.readline()
-            if not raw:
-                # Timeout with no data; keep waiting.
+            try:
+                resp = requests.get(url, timeout=args.timeout)
+                payload = resp.json()
+            except requests.RequestException as exc:
+                print(f"Request failed: {exc}", file=sys.stderr)
+                time.sleep(args.interval)
                 continue
-            line = raw.decode("ascii", errors="ignore").strip()
-            if not line:
+            except ValueError:
+                print("Invalid JSON from ESP32.", file=sys.stderr)
+                time.sleep(args.interval)
                 continue
 
-            parsed = parse_hot_line(line)
+            parsed = parse_thermal_response(payload)
             if parsed is None:
-                # Boot banner or error line from the Arduino; surface errors.
-                if line.startswith("ERROR,"):
-                    print(f"Arduino error: {line[len('ERROR,'):]}",
-                          file=sys.stderr)
-                continue
+                error = payload.get("error") if isinstance(payload, dict) else None
+                print(f"ESP32 error: {error or 'invalid reading'}",
+                      file=sys.stderr)
+            else:
+                temp, row, col = parsed
+                print(f"Hottest pixel: {temp:.1f} C at (row={row}, col={col})")
 
-            temp, row, col = parsed
-            print(f"Hottest pixel: {temp:.1f} C at (row={row}, col={col})")
+            time.sleep(args.interval)
     except KeyboardInterrupt:
         print("\nStopped.")
-    finally:
-        try:
-            ser.close()
-        except Exception:
-            pass
 
     return 0
 
