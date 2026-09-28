@@ -1,6 +1,8 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <ESP32Servo.h>
+#include <Wire.h>
+#include <Adafruit_AMG88xx.h>
 
 const char* apSSID = "ESP32-Turret";
 const char* apPassword = "12345678";
@@ -10,9 +12,25 @@ const int MOVE_INTERVAL = 20; // ms between movement steps
 const int RETRACT_PIN = 27;
 const int FIRE_PIN = 26;
 const int TRIGGER_PIN = 14;
+
+// AMG8833 thermal camera on the ESP32's default I2C bus.
+// Wiring (AMG8833 breakout -> ESP32):
+//   VIN -> 3V3   (the AMG8833 is a 3.3V part; do NOT use 5V)
+//   GND -> GND
+//   SDA -> GPIO21
+//   SCL -> GPIO22
+//   INT -> not connected
+const int I2C_SDA_PIN = 21;
+const int I2C_SCL_PIN = 22;
+
 Servo servoX;
 Servo servoY;
 Servo servoTrigger;
+
+Adafruit_AMG88xx amg;
+bool thermalReady = false;
+// 8x8 = 64 pixels, stored row-major (index = row * 8 + col).
+float thermalPixels[AMG88xx_PIXEL_ARRAY_SIZE];
 
 // The X servo is physically wired inverted: servo angle 0 points right and
 // 180 points left. The API and internal angleX always use the convention
@@ -34,6 +52,18 @@ WebServer server(80);
 
 void setup() {
   Serial.begin(115200);
+
+  // Bring up the AMG8833 on the ESP32 I2C bus. If it is not detected, the
+  // turret still runs; /api/thermal reports ok:false so the controller can
+  // apply its fail-open/fail-closed policy.
+  Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
+  thermalReady = amg.begin();
+  if (thermalReady) {
+    Serial.println("AMG8833 initialized.");
+  } else {
+    Serial.println("ERROR,AMG8833 not detected. Check wiring (VIN=3V3, GND=GND, SDA=GPIO21, SCL=GPIO22).");
+  }
+
   servoX.attach(SERVO_X_PIN);
   servoY.attach(SERVO_Y_PIN);
   servoTrigger.attach(TRIGGER_PIN);
@@ -52,6 +82,7 @@ void setup() {
 
   server.on("/", HTTP_GET, handleStatus);
   server.on("/api/status", HTTP_GET, handleStatus);
+  server.on("/api/thermal", HTTP_GET, handleThermal);
   server.on("/api/servo/x", HTTP_GET, handleServoX);
   server.on("/api/servo/y", HTTP_GET, handleServoY);
   server.on("/api/servo/trigger", HTTP_GET, handleTrigger);
@@ -117,6 +148,41 @@ void handleStatus() {
   json += "\"x\":" + String(angleX) + ",";
   json += "\"y\":" + String(angleY) + ",";
   json += "\"trigger\":" + String(angleTrigger);
+  json += "}";
+  server.send(200, "application/json", json);
+}
+
+// GET /api/thermal
+// Reads the 8x8 AMG8833 grid, finds the hottest pixel, and returns:
+//   {"ok":true,"max_temp_c":<float>,"row":<int>,"col":<int>}
+// or, if the sensor is missing/read fails:
+//   {"ok":false,"error":"..."}
+void handleThermal() {
+  if (!thermalReady) {
+    server.send(200, "application/json",
+                "{\"ok\":false,\"error\":\"AMG8833 not detected\"}");
+    return;
+  }
+
+  amg.readPixels(thermalPixels);
+
+  float maxTemp = thermalPixels[0];
+  int maxIndex = 0;
+  for (int i = 1; i < AMG88xx_PIXEL_ARRAY_SIZE; i++) {
+    if (thermalPixels[i] > maxTemp) {
+      maxTemp = thermalPixels[i];
+      maxIndex = i;
+    }
+  }
+
+  int row = maxIndex / 8;
+  int col = maxIndex % 8;
+
+  String json = "{";
+  json += "\"ok\":true,";
+  json += "\"max_temp_c\":" + String(maxTemp, 2) + ",";
+  json += "\"row\":" + String(row) + ",";
+  json += "\"col\":" + String(col);
   json += "}";
   server.send(200, "application/json", json);
 }
