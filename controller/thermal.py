@@ -1,86 +1,66 @@
 """AMG8833 thermal verification layer.
 
-The AMG8833 (Panasonic Grid-EYE) thermal camera is wired to an Arduino Uno
-over USB serial (VIN=5V, GND=GND, SCL=A5, SDA=A4). The Uno reads the 8x8 pixel
-grid, finds the hottest pixel, and streams it over USB serial as:
+The AMG8833 (Panasonic Grid-EYE) thermal camera is wired directly to the servo
+ESP32 over I2C (VIN=3V3, GND=GND, SDA=GPIO21, SCL=GPIO22). The ESP32 reads the
+8x8 pixel grid, finds the hottest pixel, and exposes it over its access-point
+HTTP server as:
 
-    HOT,<temp_c>,<row>,<col>
+    GET http://<SERVO_IP>/api/thermal
+    -> {"ok":true,"max_temp_c":<float>,"row":<int>,"col":<int>}
 
-This module wraps that serial stream in a background reader thread and exposes
-the hottest pixel temperature plus a boolean "thermal OK" verdict used as a
-second verification layer before the fire trigger fires.
+This module polls that endpoint in a background thread and exposes the hottest
+pixel temperature plus a boolean "thermal OK" verdict used as a second
+verification layer before the fire trigger fires.
 
-The wire protocol and parsing logic mirror `amg8833_test.py` and the Arduino
-sketch at `arduino/thermal/thermal.ino`.
+The wire protocol mirrors the ESP32 sketch at `arduino/servo/servo.ino`.
 """
 
-import sys
 import threading
 import time
 
-# Prefix the Arduino sketch uses for hot-pixel lines. Any other line (boot
-# banner, error text) is ignored.
-HOT_PREFIX = "HOT,"
+import requests
 
-# If no fresh HOT line arrives within this many seconds, the sensor is treated
-# as unavailable (stale). The Arduino streams at ~10 Hz, so 2 s is generous.
+# If no fresh reading arrives within this many seconds, the sensor is treated
+# as unavailable (stale). The controller polls at THERMAL_POLL_INTERVAL, so a
+# few seconds is generous.
 STALE_SECONDS = 2.0
 
 
-def parse_hot_line(line):
-    """Parse a 'HOT,<temp>,<row>,<col>' line.
+def parse_thermal_response(payload):
+    """Parse a /api/thermal JSON payload.
 
-    Returns (temp, row, col) as (float, int, int), or None if the line is not
-    a valid hot-pixel line.
+    Returns (temp, row, col) as (float, int, int), or None if the payload does
+    not represent a valid reading (ok is false, missing fields, bad types).
     """
-    if not line.startswith(HOT_PREFIX):
-        return None
-    parts = line.split(",")
-    if len(parts) != 4:
+    if not isinstance(payload, dict) or not payload.get("ok"):
         return None
     try:
-        temp = float(parts[1])
-        row = int(parts[2])
-        col = int(parts[3])
-    except ValueError:
+        temp = float(payload["max_temp_c"])
+        row = int(payload["row"])
+        col = int(payload["col"])
+    except (KeyError, TypeError, ValueError):
         return None
     return temp, row, col
 
 
-def open_serial(port, baud):
-    """Open the serial port, or raise RuntimeError with a helpful message."""
-    try:
-        import serial
-    except ImportError as exc:
-        raise RuntimeError(
-            "pyserial is not installed. Run: pip install pyserial"
-        ) from exc
-
-    try:
-        return serial.Serial(port=port, baudrate=baud, timeout=1)
-    except serial.SerialException as exc:
-        raise RuntimeError(
-            f"Could not open serial port {port} at {baud} baud: {exc}. "
-            "Check that the Arduino is connected and the port is correct "
-            "(Arduino IDE > Tools > Port)."
-        ) from exc
-
-
 class ThermalSensor:
-    """Reads the hottest AMG8833 pixel temperature from a serial bridge.
+    """Reads the hottest AMG8833 pixel temperature from the ESP32 HTTP API.
 
-    Opens the serial port and runs a daemon reader thread that parses
-    ``HOT,<temp>,<row>,<col>`` lines, keeping the latest temperature and its
-    timestamp. ``read()`` returns the current max temperature and whether it
-    clears the configured threshold.
+    Runs a daemon poller thread that GETs ``/api/thermal`` on the servo ESP32,
+    keeping the latest temperature and its timestamp. ``read()`` returns the
+    current max temperature and whether it clears the configured threshold.
 
-    If the serial port cannot be opened, the sensor is marked unavailable and
+    If the endpoint is unreachable, the sensor is marked unavailable and
     ``read()`` reports ``thermal_ok`` according to ``fail_open`` so the rest of
     the controller can still boot and run without the sensor attached.
     """
 
-    def __init__(self, port, baud, threshold_c, fail_open=True):
+    def __init__(self, base_url, threshold_c, poll_interval=0.2,
+                 http_timeout=1.0, fail_open=True):
+        self._url = f"{base_url.rstrip('/')}/api/thermal"
         self._threshold_c = threshold_c
+        self._poll_interval = poll_interval
+        self._http_timeout = http_timeout
         self._fail_open = fail_open
         self._lock = threading.Lock()
         self._max_temp_c = None
@@ -88,15 +68,10 @@ class ThermalSensor:
         self._available = False
         self._stop = threading.Event()
         self._thread = None
-        self._ser = None
 
-        try:
-            self._ser = open_serial(port, baud)
-        except RuntimeError as exc:
-            print(f"Thermal sensor unavailable: {exc}")
-            return
+        # Probe once so `available` reflects reality at construction time.
+        self._available = self._poll_once()
 
-        self._available = True
         self._thread = threading.Thread(
             target=self._reader_loop,
             daemon=True,
@@ -106,37 +81,37 @@ class ThermalSensor:
 
     @property
     def available(self):
-        """True if the serial port was opened successfully."""
+        """True if the ESP32 thermal endpoint responded successfully."""
         return self._available
 
+    def _poll_once(self):
+        """Fetch and parse one reading. Returns True on a valid reading."""
+        try:
+            resp = requests.get(self._url, timeout=self._http_timeout)
+        except requests.RequestException:
+            return False
+        if resp.status_code != 200:
+            return False
+        try:
+            payload = resp.json()
+        except ValueError:
+            return False
+
+        parsed = parse_thermal_response(payload)
+        if parsed is None:
+            return False
+
+        temp, _row, _col = parsed
+        with self._lock:
+            self._max_temp_c = temp
+            self._last_read_time = time.monotonic()
+        return True
+
     def _reader_loop(self):
-        """Read and parse HOT lines until stopped."""
+        """Poll the ESP32 endpoint until stopped."""
         while not self._stop.is_set():
-            try:
-                raw = self._ser.readline()
-            except Exception as exc:
-                print(f"Thermal serial read error: {exc}")
-                break
-            if not raw:
-                # Timeout with no data; keep waiting.
-                continue
-            line = raw.decode("ascii", errors="ignore").strip()
-            if not line:
-                continue
-
-            parsed = parse_hot_line(line)
-            if parsed is None:
-                # Boot banner or error line from the Arduino; surface errors.
-                if line.startswith("ERROR,"):
-                    print(f"Arduino error: {line[len('ERROR,'):]}",
-                          file=sys.stderr)
-                continue
-
-            temp, _row, _col = parsed
-            now = time.monotonic()
-            with self._lock:
-                self._max_temp_c = temp
-                self._last_read_time = now
+            self._available = self._poll_once()
+            self._stop.wait(self._poll_interval)
 
     def read(self):
         """Return (max_temp_c, thermal_ok).
@@ -161,13 +136,8 @@ class ThermalSensor:
         return max_temp_c, max_temp_c >= self._threshold_c
 
     def close(self):
-        """Stop the reader thread and close the serial port."""
+        """Stop the poller thread."""
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=1.0)
-        if self._ser is not None:
-            try:
-                self._ser.close()
-            except Exception:
-                pass
         self._available = False
