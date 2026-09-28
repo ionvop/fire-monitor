@@ -27,8 +27,8 @@ from config import (
     SERVO_IP,
     THERMAL_ENABLED,
     THERMAL_FAIL_OPEN,
-    THERMAL_SERIAL_BAUD,
-    THERMAL_SERIAL_PORT,
+    THERMAL_HTTP_TIMEOUT,
+    THERMAL_POLL_INTERVAL,
     THERMAL_THRESHOLD_C,
     WEBCAM_INDEX,
 )
@@ -750,12 +750,14 @@ def main():
 
     print(f"Dashboard available at http://localhost:{DASHBOARD_PORT}")
 
-    # AMG8833 thermal verification layer. If the sensor can't be opened, the
+    # AMG8833 thermal verification layer. The sensor is wired to the servo
+    # ESP32 and polled over the AP network. If the endpoint is unreachable, the
     # controller still boots and thermal_ok follows THERMAL_FAIL_OPEN.
     thermal_sensor = ThermalSensor(
-        port=THERMAL_SERIAL_PORT,
-        baud=THERMAL_SERIAL_BAUD,
+        base_url=SERVO_BASE_URL,
         threshold_c=THERMAL_THRESHOLD_C,
+        poll_interval=THERMAL_POLL_INTERVAL,
+        http_timeout=THERMAL_HTTP_TIMEOUT,
         fail_open=THERMAL_FAIL_OPEN,
     )
     if not thermal_sensor.available:
