@@ -14,7 +14,6 @@ from config import (
     DASHBOARD_PORT,
     DEBUG_DISABLE_TRIGGER,
     FIRE_CONF_THRESHOLD,
-    FIRE_TRACK_DEADBAND_PIXELS,
     MIN_FIRE_DURATION,
     SCAN_X_MAX,
     SCAN_X_MIN,
@@ -24,9 +23,12 @@ from config import (
     SERVO_IP,
     THERMAL_ENABLED,
     THERMAL_FAIL_OPEN,
+    THERMAL_FLIP_X,
+    THERMAL_FLIP_Y,
     THERMAL_HTTP_TIMEOUT,
     THERMAL_POLL_INTERVAL,
     THERMAL_THRESHOLD_C,
+    THERMAL_TRACK_DEADBAND_PIXELS,
     WEBCAM_INDEX,
 )
 from alerts import enqueue_fire_report, start_alert_worker, stop_alert_worker
@@ -73,9 +75,13 @@ fire_conf_threshold = FIRE_CONF_THRESHOLD
 
 # Latest AMG8833 thermal reading, shared between the detection thread and the
 # web server. max_temp_c is the hottest pixel temperature (None if unavailable
-# or stale); thermal_ok is whether it clears the configured threshold.
+# or stale); thermal_ok is whether it clears the configured threshold;
+# thermal_row/thermal_col are the hottest pixel's 0-based grid coordinates
+# (None if unavailable or stale), used to aim the turret.
 thermal_max_temp_c = None
 thermal_ok = False
+thermal_row = None
+thermal_col = None
 
 
 # ---------------------------------------------------------------------------
@@ -222,60 +228,44 @@ scanner = RoomScanner()
 # ---------------------------------------------------------------------------
 # Fire detection & control loop
 # ---------------------------------------------------------------------------
-def track_fire(boxes, frame_shape):
-    """Continuously steer the turret toward the fire while firing.
+def track_thermal(row, col):
+    """Continuously steer the turret toward the thermal hottest pixel.
 
-    Only called in automatic mode while a fire is actively detected. Computes
-    the fire bbox center in pixels and its offset from the frame center. As
-    long as the fire is outside the configured deadzone (FIRE_TRACK_DEADBAND_
-    PIXELS), it issues continuous /api/move commands so the turret keeps
-    moving toward the fire instead of jumping to an absolute angle. Once the
-    fire is within the deadzone on both axes, all movement stops.
+    Only called in automatic mode while a fire is actively detected. The
+    AMG8833 reports an 8x8 grid; the hottest pixel's (row, col) is compared to
+    the grid center (3.5, 3.5). As long as the hot pixel is outside the
+    configured deadzone (THERMAL_TRACK_DEADBAND_PIXELS), continuous /api/move
+    commands keep the turret moving toward it instead of jumping to an absolute
+    angle. Once the hot pixel is within the deadzone on both axes, all movement
+    stops.
 
-    Returns True if a fire was found and tracking commands were issued.
+    THERMAL_FLIP_X / THERMAL_FLIP_Y invert the mapping for a rotated or
+    mirrored sensor mount.
+
+    Returns True if a hot pixel was available and tracking commands were
+    issued, or False if no fresh thermal reading is available.
     """
-    if boxes is None:
+    if row is None or col is None:
         return False
 
-    with state_lock:
-        threshold = fire_conf_threshold
+    # Offset of the hot pixel from the grid center (3.5, 3.5).
+    dx = col - 3.5
+    dy = row - 3.5
+    if THERMAL_FLIP_X:
+        dx = -dx
+    if THERMAL_FLIP_Y:
+        dy = -dy
 
-    # Pick the highest-confidence fire detection.
-    best = None
-    best_conf = 0.0
-    for box in boxes:
-        cls = int(box.cls[0])
-        conf = float(box.conf[0])
-        if cls == 0 and conf > threshold and conf > best_conf:
-            best = box
-            best_conf = conf
-    if best is None:
-        return False
-
-    # Fire bbox center in pixels.
-    x1, y1, x2, y2 = (float(v) for v in best.xyxy[0])
-    fire_cx = (x1 + x2) / 2.0
-    fire_cy = (y1 + y2) / 2.0
-
-    # Frame center in pixels.
-    height, width = frame_shape[:2]
-    frame_cx = width / 2.0
-    frame_cy = height / 2.0
-
-    # Pixel offset of the fire from the frame center.
-    dx = fire_cx - frame_cx
-    dy = fire_cy - frame_cy
-
-    # X axis: keep moving toward the fire horizontally while it is off-center.
-    if abs(dx) > FIRE_TRACK_DEADBAND_PIXELS:
+    # X axis: keep moving toward the hot pixel horizontally while off-center.
+    if abs(dx) > THERMAL_TRACK_DEADBAND_PIXELS:
         servo_client.set_move("x", "right" if dx > 0 else "left")
     else:
         servo_client.stop_axis("x")
 
-    # Y axis: keep moving toward the fire vertically while it is off-center.
-    # dy > 0 means the fire is below the frame center, so the camera must tilt
-    # down to follow it; dy < 0 means the fire is above, so tilt up.
-    if abs(dy) > FIRE_TRACK_DEADBAND_PIXELS:
+    # Y axis: keep moving toward the hot pixel vertically while off-center.
+    # dy > 0 means the hot pixel is below the grid center, so the camera must
+    # tilt down to follow it; dy < 0 means it is above, so tilt up.
+    if abs(dy) > THERMAL_TRACK_DEADBAND_PIXELS:
         servo_client.set_move("y", "down" if dy > 0 else "up")
     else:
         servo_client.stop_axis("y")
@@ -284,7 +274,8 @@ def track_fire(boxes, frame_shape):
 
 
 def detection_loop(model, cap, thermal_sensor=None):
-    global latest_frame, fire_active, scanner, thermal_max_temp_c, thermal_ok
+    global latest_frame, fire_active, scanner
+    global thermal_max_temp_c, thermal_ok, thermal_row, thermal_col
 
     scanner = RoomScanner()
     last_state = None
@@ -343,14 +334,20 @@ def detection_loop(model, cap, thermal_sensor=None):
             capture_on = capture_enabled
 
         # Read the AMG8833 thermal verdict. When THERMAL_ENABLED, the hottest
-        # pixel must clear the threshold for the trigger to fire. The latest
-        # reading is also published to the dashboard via /api/status.
+        # pixel must clear the threshold for the trigger to fire. The hottest
+        # pixel's row/col is also published (and used below to aim the turret).
         thermal_pass = True
+        thermal_row_reading = None
+        thermal_col_reading = None
         if thermal_sensor is not None:
-            max_temp_c, ok = thermal_sensor.read()
+            max_temp_c, ok, thermal_row_reading, thermal_col_reading = (
+                thermal_sensor.read()
+            )
             with state_lock:
                 thermal_max_temp_c = max_temp_c
                 thermal_ok = ok
+                thermal_row = thermal_row_reading
+                thermal_col = thermal_col_reading
             if THERMAL_ENABLED:
                 thermal_pass = ok
 
@@ -383,10 +380,12 @@ def detection_loop(model, cap, thermal_sensor=None):
                     status.get("y") if status else None,
                 )
 
-            # In automatic mode, center on the fire while firing. Manual mode
-            # keeps the old stop-and-fire-in-place behavior.
+            # In automatic mode, aim at the thermal hottest pixel while firing.
+            # Manual mode keeps the old stop-and-fire-in-place behavior. If no
+            # fresh thermal reading is available, stop rather than drift.
             if auto:
-                track_fire(boxes, frame.shape)
+                if not track_thermal(thermal_row_reading, thermal_col_reading):
+                    stop_all_movement()
         else:
             if last_state == "fire":
                 # The fire is no longer detected. Stop any continuous tracking
@@ -457,6 +456,8 @@ def api_status():
         status["thermal_threshold_c"] = THERMAL_THRESHOLD_C
         status["max_temp_c"] = thermal_max_temp_c
         status["thermal_ok"] = thermal_ok
+        status["thermal_row"] = thermal_row
+        status["thermal_col"] = thermal_col
     return jsonify(status)
 
 
@@ -636,9 +637,11 @@ def main():
 
     print(f"Dashboard available at http://localhost:{DASHBOARD_PORT}")
 
-    # AMG8833 thermal verification layer. The sensor is wired to the servo
-    # ESP32 and polled over the AP network. If the endpoint is unreachable, the
-    # controller still boots and thermal_ok follows THERMAL_FAIL_OPEN.
+    # AMG8833 thermal layer. The sensor is wired to the servo ESP32 and polled
+    # over the AP network. It gates the trigger (hottest pixel must clear the
+    # threshold) and drives aiming (turret steers toward the hottest pixel). If
+    # the endpoint is unreachable, the controller still boots and thermal_ok
+    # follows THERMAL_FAIL_OPEN.
     thermal_sensor = ThermalSensor(
         base_url=SERVO_BASE_URL,
         threshold_c=THERMAL_THRESHOLD_C,
