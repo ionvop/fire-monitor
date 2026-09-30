@@ -177,7 +177,7 @@ def report_fire(status: str, confidence: float, x: float, y: float,
 
     Args:
         status: "detected" or "retracted".
-        confidence: YOLO confidence (0.0-1.0) at detection.
+        confidence: thermal-derived confidence (0.0-1.0) at detection.
         x, y: servo pan/tilt angles at detection.
         capture_url: optional URL of the annotated capture image.
         force: bypass the cooldown (used by the standalone test script).
