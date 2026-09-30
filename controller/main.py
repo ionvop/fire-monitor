@@ -4,15 +4,12 @@ import time
 from datetime import datetime
 
 import cv2
-import requests
 from flask import Flask, Response, jsonify, request, send_from_directory
 from flask_socketio import SocketIO
 from ultralytics import YOLO
 
 from config import (
-    CAPTURE_DIR,
     CAPTURE_ENABLED_DEFAULT,
-    CAPTURE_MAX,
     DASHBOARD_HOST,
     DASHBOARD_PORT,
     DEBUG_DISABLE_TRIGGER,
@@ -32,7 +29,17 @@ from config import (
     THERMAL_THRESHOLD_C,
     WEBCAM_INDEX,
 )
-from alerts import report_fire
+from alerts import enqueue_fire_report, start_alert_worker, stop_alert_worker
+from captures import (
+    clear_captures,
+    delete_capture,
+    enqueue_capture,
+    list_captures,
+    start_capture_worker,
+    stop_capture_worker,
+    _capture_dir,
+)
+from servo import ServoClient, servo_get as _servo_get
 from thermal import ThermalSensor
 
 SERVO_BASE_URL = f"http://{SERVO_IP}"
@@ -44,6 +51,11 @@ DEGREE_MOVE_SECONDS = 0.02
 
 app = Flask(__name__, static_folder=None)
 socketio = SocketIO(app, cors_allowed_origins="*")
+
+# Non-blocking servo client. All movement/trigger commands are queued to a
+# background worker and the latest angles are cached by a status poller, so the
+# detection loop never blocks on servo HTTP requests.
+servo_client = ServoClient(SERVO_BASE_URL)
 
 # Shared state between the detection thread and the web server.
 state_lock = threading.Lock()
@@ -70,21 +82,13 @@ thermal_ok = False
 # Servo controller helpers
 # ---------------------------------------------------------------------------
 def servo_get(path, params=None, timeout=1.0):
-    try:
-        return requests.get(f"{SERVO_BASE_URL}{path}", params=params, timeout=timeout)
-    except requests.RequestException as exc:
-        print(f"Servo request failed ({path}): {exc}")
-        return None
+    """Blocking servo GET, used only by the Flask routes (own thread)."""
+    return _servo_get(SERVO_BASE_URL, path, params, timeout)
 
 
 def stop_all_movement():
-    """Stop any continuous movement on both axes."""
-    for axis in ("x", "y"):
-        for direction in ("left", "right", "up", "down"):
-            servo_get(
-                "/api/move",
-                {"axis": axis, "dir": direction, "cmd": "stop"},
-            )
+    """Stop any continuous movement on both axes (non-blocking)."""
+    servo_client.stop_all()
 
 
 def fire_trigger():
@@ -97,18 +101,12 @@ def fire_trigger():
     if DEBUG_DISABLE_TRIGGER:
         print("DEBUG_DISABLE_TRIGGER is set; skipping trigger fire.")
         return
-    servo_get("/api/servo/trigger", {"state": "fire"})
+    servo_client.trigger("fire")
 
 
 def get_status():
-    """Return the current servo angles as a dict, or None on failure."""
-    resp = servo_get("/api/status")
-    if resp is None or resp.status_code != 200:
-        return None
-    try:
-        return resp.json()
-    except ValueError:
-        return None
+    """Return the latest cached servo angles as a dict, or None if unknown."""
+    return servo_client.get_status()
 
 
 def center_servos():
@@ -122,111 +120,15 @@ def center_servos():
         print("Could not read servo status; skipping centering.")
         return
 
-    servo_get("/api/servo/x", {"angle": 90})
-    servo_get("/api/servo/y", {"angle": 90})
+    servo_client.set_angle("x", 90)
+    servo_client.set_angle("y", 90)
 
 
 # ---------------------------------------------------------------------------
 # Fire screenshot capture
 # ---------------------------------------------------------------------------
-def _capture_dir():
-    """Return the absolute path to the capture directory, creating it if needed."""
-    path = os.path.abspath(CAPTURE_DIR)
-    os.makedirs(path, exist_ok=True)
-    return path
-
-
-def list_captures():
-    """Return a list of capture dicts (filename, timestamp), newest first."""
-    path = _capture_dir()
-    captures = []
-    for name in os.listdir(path):
-        full = os.path.join(path, name)
-        if not os.path.isfile(full) or not name.lower().endswith(".jpg"):
-            continue
-        try:
-            ts = datetime.fromtimestamp(os.path.getmtime(full)).strftime(
-                "%Y-%m-%d %H:%M:%S"
-            )
-        except OSError:
-            ts = ""
-        captures.append({"filename": name, "timestamp": ts})
-    captures.sort(key=lambda c: c["filename"], reverse=True)
-    return captures
-
-
-def _enforce_capture_limit():
-    """Delete the oldest captures so at most CAPTURE_MAX remain."""
-    path = _capture_dir()
-    files = sorted(
-        (os.path.join(path, name) for name in os.listdir(path)
-         if name.lower().endswith(".jpg")),
-        key=os.path.getmtime,
-    )
-    while len(files) > CAPTURE_MAX:
-        oldest = files.pop(0)
-        try:
-            os.remove(oldest)
-        except OSError:
-            pass
-
-
-def save_capture(frame):
-    """Save an annotated frame as a JPEG capture and enforce the size cap.
-
-    Returns the filename on success, or None on failure.
-    """
-    if frame is None:
-        return None
-    path = _capture_dir()
-    filename = datetime.now().strftime("%Y%m%d_%H%M%S") + ".jpg"
-    full = os.path.join(path, filename)
-    # Avoid collisions if two events land in the same second.
-    counter = 1
-    while os.path.exists(full):
-        filename = datetime.now().strftime("%Y%m%d_%H%M%S") + f"_{counter}.jpg"
-        full = os.path.join(path, filename)
-        counter += 1
-    ok, jpeg = cv2.imencode(".jpg", frame)
-    if not ok:
-        return None
-    try:
-        with open(full, "wb") as f:
-            f.write(jpeg.tobytes())
-    except OSError as exc:
-        print(f"Failed to save capture: {exc}")
-        return None
-    _enforce_capture_limit()
-    print(f"Saved fire capture: {filename}")
-    return filename
-
-
-def delete_capture(filename):
-    """Delete a single capture file. Returns True if it was removed."""
-    path = _capture_dir()
-    full = os.path.join(path, os.path.basename(filename))
-    if not os.path.isfile(full):
-        return False
-    try:
-        os.remove(full)
-        return True
-    except OSError:
-        return False
-
-
-def clear_captures():
-    """Delete all capture files. Returns the number removed."""
-    path = _capture_dir()
-    removed = 0
-    for name in os.listdir(path):
-        full = os.path.join(path, name)
-        if os.path.isfile(full) and name.lower().endswith(".jpg"):
-            try:
-                os.remove(full)
-                removed += 1
-            except OSError:
-                pass
-    return removed
+# Capture helpers (list/delete/clear/save) live in captures.py; the blocking
+# save runs on a background worker via enqueue_capture().
 
 
 # ---------------------------------------------------------------------------
@@ -248,8 +150,6 @@ class RoomScanner:
         # Direction index into the up/right/down/left cycle. "Up" is increasing
         # Y (toward SCAN_Y_MAX), so the top edge sits at SCAN_Y_MAX.
         self._direction_index = 0
-        self._x_moving = False
-        self._y_moving = False
 
     @property
     def direction(self):
@@ -259,24 +159,16 @@ class RoomScanner:
     def _set_x(self, direction):
         """Start moving X in `direction` (or stop if None)."""
         if direction is None:
-            if self._x_moving:
-                servo_get("/api/move", {"axis": "x", "dir": "left", "cmd": "stop"})
-                servo_get("/api/move", {"axis": "x", "dir": "right", "cmd": "stop"})
-                self._x_moving = False
-            return
-        servo_get("/api/move", {"axis": "x", "dir": direction, "cmd": "start"})
-        self._x_moving = True
+            servo_client.stop_axis("x")
+        else:
+            servo_client.set_move("x", direction)
 
     def _set_y(self, direction):
         """Start moving Y in `direction` (or stop if None)."""
         if direction is None:
-            if self._y_moving:
-                servo_get("/api/move", {"axis": "y", "dir": "up", "cmd": "stop"})
-                servo_get("/api/move", {"axis": "y", "dir": "down", "cmd": "stop"})
-                self._y_moving = False
-            return
-        servo_get("/api/move", {"axis": "y", "dir": direction, "cmd": "start"})
-        self._y_moving = True
+            servo_client.stop_axis("y")
+        else:
+            servo_client.set_move("y", direction)
 
     def stop(self):
         """Stop all scanning movement."""
@@ -370,37 +262,23 @@ def track_fire(boxes, frame_shape):
     frame_cx = width / 2.0
     frame_cy = height / 2.0
 
-    status = get_status()
-    if status is None:
-        return False
-
     # Pixel offset of the fire from the frame center.
     dx = fire_cx - frame_cx
     dy = fire_cy - frame_cy
 
     # X axis: keep moving toward the fire horizontally while it is off-center.
     if abs(dx) > FIRE_TRACK_DEADBAND_PIXELS:
-        direction = "right" if dx > 0 else "left"
-        opposite = "left" if direction == "right" else "right"
-        # Explicitly stop the opposite direction before starting the new one.
-        servo_get("/api/move", {"axis": "x", "dir": opposite, "cmd": "stop"})
-        servo_get("/api/move", {"axis": "x", "dir": direction, "cmd": "start"})
+        servo_client.set_move("x", "right" if dx > 0 else "left")
     else:
-        servo_get("/api/move", {"axis": "x", "dir": "left", "cmd": "stop"})
-        servo_get("/api/move", {"axis": "x", "dir": "right", "cmd": "stop"})
+        servo_client.stop_axis("x")
 
     # Y axis: keep moving toward the fire vertically while it is off-center.
     # dy > 0 means the fire is below the frame center, so the camera must tilt
     # down to follow it; dy < 0 means the fire is above, so tilt up.
     if abs(dy) > FIRE_TRACK_DEADBAND_PIXELS:
-        direction = "down" if dy > 0 else "up"
-        opposite = "up" if direction == "down" else "down"
-        # Explicitly stop the opposite direction before starting the new one.
-        servo_get("/api/move", {"axis": "y", "dir": opposite, "cmd": "stop"})
-        servo_get("/api/move", {"axis": "y", "dir": direction, "cmd": "start"})
+        servo_client.set_move("y", "down" if dy > 0 else "up")
     else:
-        servo_get("/api/move", {"axis": "y", "dir": "up", "cmd": "stop"})
-        servo_get("/api/move", {"axis": "y", "dir": "down", "cmd": "stop"})
+        servo_client.stop_axis("y")
 
     return True
 
@@ -485,12 +363,15 @@ def detection_loop(model, cap, thermal_sensor=None):
                 with state_lock:
                     fire_active = True
                 # Save a screenshot of the annotated frame on first detection.
+                # The frame is copied so the background worker can encode it
+                # while the loop reuses its buffer.
                 if capture_on:
-                    save_capture(annotated_frame)
+                    enqueue_capture(annotated_frame.copy())
                 # Report the detection to the remote backend (logs to
                 # fire_history and pushes to subscribers, subject to cooldown).
+                # Queued to a worker so the loop never blocks on the network.
                 status = get_status()
-                report_fire(
+                enqueue_fire_report(
                     "detected",
                     best_conf,
                     status.get("x") if status else None,
@@ -508,15 +389,15 @@ def detection_loop(model, cap, thermal_sensor=None):
                 # toward where the fire was before scanning resumes.
                 stop_all_movement()
                 if fire_start_time is not None and (current_time - fire_start_time) >= MIN_FIRE_DURATION:
-                    servo_get("/api/servo/trigger", {"state": "retract"})
+                    servo_client.trigger("retract")
                     last_state = "retract"
                     fire_start_time = None
                     with state_lock:
                         fire_active = False
                     # Report the retraction so the PWA marks the alert resolved.
-                    report_fire("retracted", best_conf, None, None)
+                    enqueue_fire_report("retracted", best_conf, None, None)
             elif last_state != "retract":
-                servo_get("/api/servo/trigger", {"state": "retract"})
+                servo_client.trigger("retract")
                 last_state = "retract"
 
         # Automatic scanning only in automatic mode and when no fire is active.
@@ -766,6 +647,11 @@ def main():
             f"fail-open={THERMAL_FAIL_OPEN}, enabled={THERMAL_ENABLED}"
         )
 
+    # Start the background workers that keep blocking I/O off the detection
+    # loop: alert log/push and fire screenshot saving.
+    start_alert_worker()
+    start_capture_worker()
+
     center_servos()
 
     detection_thread = threading.Thread(
@@ -785,7 +671,10 @@ def main():
         )
     finally:
         stop_all_movement()
-        servo_get("/api/servo/trigger", {"state": "retract"})
+        servo_client.trigger("retract")
+        stop_alert_worker()
+        stop_capture_worker()
+        servo_client.close()
         thermal_sensor.close()
         cap.release()
 
