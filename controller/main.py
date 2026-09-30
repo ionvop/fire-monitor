@@ -297,7 +297,14 @@ def detection_loop(model, cap, thermal_sensor=None):
             time.sleep(0.1)
             continue
 
-        results = model(frame, imgsz=640)
+        # Read the current fire confidence threshold before inference so the
+        # preview only annotates confident fire detections. Passing conf and
+        # classes to the model means results[0].plot() below draws only class-0
+        # (fire) boxes above the threshold, keeping the preview in sync with
+        # what can actually trigger an alert.
+        with state_lock:
+            threshold = fire_conf_threshold
+        results = model(frame, imgsz=640, conf=threshold, classes=[0])
         annotated_frame = results[0].plot()
 
         # Overlay the current datetime on the annotated frame.
@@ -322,8 +329,6 @@ def detection_loop(model, cap, thermal_sensor=None):
         best_conf = 0.0
         boxes = results[0].boxes
         if boxes is not None:
-            with state_lock:
-                threshold = fire_conf_threshold
             for box in boxes:
                 cls = int(box.cls[0])
                 conf = float(box.conf[0])
