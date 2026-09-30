@@ -11,7 +11,7 @@ The project is divided into three main components:
 1. **Arduino (Firmware):**
     * **Servo:** An ESP32 that controls two servos (Pan/Tilt) and two digital pins for a firing/retracting mechanism. It also reads the **AMG8833 thermal camera** over I2C and exposes the hottest pixel via `/api/thermal`. It runs a web server (on its own access point) to receive movement/firing commands and serve thermal readings.
 
-2. **Controller (AI Brain):** A Python script running YOLOv8. It captures video from a **webcam**, detects fire, scans the room by driving the servo's movement endpoints, and sends logic commands to the Servo controller. It also serves the dashboard and proxies manual-control commands.
+2. **Controller (AI Brain):** A Python script running YOLOv8. It captures video from a **webcam**, detects fire, scans the room by driving the servo's movement endpoints, and sends logic commands to the Servo controller. The webcam is used for the dashboard preview and fire-detection captures; **turret aiming is driven by the AMG8833 thermal camera's hottest pixel**, not the webcam bbox. It also serves the dashboard and proxies manual-control commands.
 
 3. **Dashboard (Manual Control):** A web-based interface served by the controller to view the live (annotated) stream and manually control the turret's movement and firing. When a user is connected, the controller pauses automatic scanning.
 
@@ -101,6 +101,9 @@ All behavior is configured in `controller/config.py`:
 | `THERMAL_POLL_INTERVAL` | `0.2` | Seconds between `/api/thermal` polls. |
 | `THERMAL_HTTP_TIMEOUT` | `1.0` | Per-request HTTP timeout when polling the thermal endpoint. |
 | `THERMAL_FAIL_OPEN` | `True` | If the sensor is unavailable, allow firing (`True`) or block it (`False`). |
+| `THERMAL_FLIP_X` | `False` | Invert the hot pixel's horizontal mapping (for a mirrored/rotated sensor mount). |
+| `THERMAL_FLIP_Y` | `False` | Invert the hot pixel's vertical mapping (for a mirrored/rotated sensor mount). |
+| `THERMAL_TRACK_DEADBAND_PIXELS` | `0.5` | Grid offset from center (3.5) within which the turret stops aiming. |
 | `DASHBOARD_HOST` | `0.0.0.0` | Host the dashboard server binds to. |
 | `DASHBOARD_PORT` | `5000` | Port the dashboard server listens on. |
 | `SCAN_X_MIN` / `SCAN_X_MAX` | `0` / `180` | Pan (X) sweep limits in degrees. |
@@ -144,7 +147,9 @@ The Servo ESP32 exposes the following endpoints for integration:
 
 ## 🧠 Behavior
 
-* **Detection:** The controller runs the YOLO model on each webcam frame. A detection of **Class 0** (fire) with confidence above `FIRE_CONF_THRESHOLD` triggers engagement.
+* **Detection:** The controller runs the YOLO model on each webcam frame. A detection of **Class 0** (fire) with confidence above `FIRE_CONF_THRESHOLD` triggers engagement. The webcam is used for the dashboard preview and fire-detection captures.
+* **Thermal verification:** When `THERMAL_ENABLED` is `True`, the AMG8833's hottest pixel must also exceed `THERMAL_THRESHOLD_C` before the trigger fires, so both the webcam and thermal layers must agree.
+* **Aiming:** While a fire is detected in automatic mode, the turret steers toward the **thermal hottest pixel** (its `row`/`col` on the 8x8 grid) rather than the webcam bbox center. It keeps moving until the hot pixel is within `THERMAL_TRACK_DEADBAND_PIXELS` of the grid center, then stops. Use `THERMAL_FLIP_X` / `THERMAL_FLIP_Y` if the sensor is mounted mirrored or rotated.
 * **Scanning:** When no user is connected and no fire is active, the controller sweeps the turret across the room using the `/api/move` endpoints, reversing at the configured sweep limits and stepping the tilt axis periodically.
 * **Engagement:** On fire detection, the controller stops scanning and sends `trigger?state=fire`. After `MIN_FIRE_DURATION` seconds it sends `trigger?state=retract`, then resumes scanning.
 * **Manual mode:** When a dashboard user connects (via WebSocket), the controller stops automatic scanning and lets the user control the turret manually. When the last user disconnects, automatic scanning resumes.
