@@ -53,8 +53,23 @@ THERMAL_FAIL_OPEN = False
 THERMAL_FLIP_X = False
 THERMAL_FLIP_Y = False
 # The turret is considered aimed at the hot pixel when its grid offset from the
-# grid center (3.5) is within this many pixels; the axis stops inside it.
+# grid center (3.5) is within this many pixels; the axis stops nudging inside
+# it. 0 means it keeps microadjusting until the hot pixel is exactly centered.
 THERMAL_TRACK_DEADBAND_PIXELS = 0
+
+# Absolute-position thermal centering. Instead of continuous left/right/up/down
+# movement, the controller reads the current X/Y angle, compares it with the
+# hottest pixel's offset from the grid center, and nudges each off-center axis
+# by this many degrees using an absolute move (/api/servo/{axis}?angle=). It
+# then waits for the reported angle to reach the target and repeats.
+THERMAL_TRACK_STEP_DEGREES = 1
+# After issuing an absolute move, wait up to this long (seconds) for the ESP32
+# to report the new angle before comparing again. This prevents double-stepping
+# on a stale status cache while bounding how long the detection loop can block.
+THERMAL_TRACK_SETTLE_TIMEOUT = 0.5
+# How often (seconds) to re-read the cached status while waiting for the angle
+# to reach the target.
+THERMAL_TRACK_SETTLE_POLL = 0.02
 
 # Fire screenshot auto-capture
 CAPTURE_DIR = "captures"          # directory (gitignored) for saved fire screenshots
