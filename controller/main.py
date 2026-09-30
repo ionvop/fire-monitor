@@ -231,13 +231,13 @@ scanner = RoomScanner()
 def track_thermal(row, col):
     """Continuously steer the turret toward the thermal hottest pixel.
 
-    Only called in automatic mode while a fire is actively detected. The
-    AMG8833 reports an 8x8 grid; the hottest pixel's (row, col) is compared to
-    the grid center (3.5, 3.5). As long as the hot pixel is outside the
-    configured deadzone (THERMAL_TRACK_DEADBAND_PIXELS), continuous /api/move
-    commands keep the turret moving toward it instead of jumping to an absolute
-    angle. Once the hot pixel is within the deadzone on both axes, all movement
-    stops.
+    Only called in automatic mode while the thermal trigger is active (the
+    hottest pixel clears the threshold). The AMG8833 reports an 8x8 grid; the
+    hottest pixel's (row, col) is compared to the grid center (3.5, 3.5). As
+    long as the hot pixel is outside the configured deadzone
+    (THERMAL_TRACK_DEADBAND_PIXELS), continuous /api/move commands keep the
+    turret moving toward it instead of jumping to an absolute angle. Once the
+    hot pixel is within the deadzone on both axes, all movement stops.
 
     THERMAL_FLIP_X / THERMAL_FLIP_Y invert the mapping for a rotated or
     mirrored sensor mount.
@@ -291,8 +291,8 @@ def detection_loop(model, cap, thermal_sensor=None):
         # Read the current fire confidence threshold before inference so the
         # preview only annotates confident fire detections. Passing conf and
         # classes to the model means results[0].plot() below draws only class-0
-        # (fire) boxes above the threshold, keeping the preview in sync with
-        # what can actually trigger an alert.
+        # (fire) boxes above the threshold. This is preview-only: the webcam
+        # detection no longer gates aiming or firing (the thermal sensor does).
         with state_lock:
             threshold = fire_conf_threshold
         results = model(frame, imgsz=640, conf=threshold, classes=[0])
@@ -316,29 +316,20 @@ def detection_loop(model, cap, thermal_sensor=None):
         with state_lock:
             latest_frame = jpeg.tobytes()
 
-        fire_detected = False
-        best_conf = 0.0
-        boxes = results[0].boxes
-        if boxes is not None:
-            for box in boxes:
-                cls = int(box.cls[0])
-                conf = float(box.conf[0])
-                if cls == 0 and conf > threshold:
-                    fire_detected = True
-                    if conf > best_conf:
-                        best_conf = conf
-
         with state_lock:
             auto = auto_mode
             auto_fire_enabled = auto_fire
             capture_on = capture_enabled
 
-        # Read the AMG8833 thermal verdict. When THERMAL_ENABLED, the hottest
-        # pixel must clear the threshold for the trigger to fire. The hottest
-        # pixel's row/col is also published (and used below to aim the turret).
-        thermal_pass = True
+        # Read the AMG8833 thermal verdict. The thermal sensor is the sole
+        # trigger for aiming and firing: the hottest pixel must clear the
+        # threshold. The webcam/YOLO results above are used only to annotate the
+        # dashboard preview and no longer gate the trigger. The hottest pixel's
+        # row/col is published and used below to aim the turret.
+        max_temp_c = None
         thermal_row_reading = None
         thermal_col_reading = None
+        thermal_trigger = False
         if thermal_sensor is not None:
             max_temp_c, ok, thermal_row_reading, thermal_col_reading = (
                 thermal_sensor.read()
@@ -348,15 +339,31 @@ def detection_loop(model, cap, thermal_sensor=None):
                 thermal_ok = ok
                 thermal_row = thermal_row_reading
                 thermal_col = thermal_col_reading
-            if THERMAL_ENABLED:
-                thermal_pass = ok
+            # Require a fresh reading (row/col present) so a fail-open sensor
+            # that is unavailable does not trigger firing.
+            thermal_trigger = (
+                THERMAL_ENABLED
+                and ok
+                and thermal_row_reading is not None
+                and thermal_col_reading is not None
+            )
+
+        # Thermal-derived confidence for the alert payload. The webcam
+        # confidence is no longer meaningful now that thermal is the trigger.
+        if max_temp_c is not None and THERMAL_THRESHOLD_C > 0:
+            thermal_conf = max(
+                0.0,
+                min(1.0, (max_temp_c - THERMAL_THRESHOLD_C) / THERMAL_THRESHOLD_C),
+            )
+        else:
+            thermal_conf = 0.0
 
         current_time = time.monotonic()
 
-        # Automatic fire-on-detection. In automatic mode it is always enabled;
-        # in manual mode it follows the auto_fire toggle. When THERMAL_ENABLED,
-        # the thermal verdict must also pass before the trigger fires.
-        if fire_detected and thermal_pass and (auto or auto_fire_enabled):
+        # Automatic fire-on-detection, driven solely by the thermal verdict. In
+        # automatic mode it is always enabled; in manual mode it follows the
+        # auto_fire toggle.
+        if thermal_trigger and (auto or auto_fire_enabled):
             if last_state != "fire":
                 scanner.stop()
                 fire_trigger()
@@ -375,7 +382,7 @@ def detection_loop(model, cap, thermal_sensor=None):
                 status = get_status()
                 enqueue_fire_report(
                     "detected",
-                    best_conf,
+                    thermal_conf,
                     status.get("x") if status else None,
                     status.get("y") if status else None,
                 )
@@ -399,7 +406,7 @@ def detection_loop(model, cap, thermal_sensor=None):
                     with state_lock:
                         fire_active = False
                     # Report the retraction so the PWA marks the alert resolved.
-                    enqueue_fire_report("retracted", best_conf, None, None)
+                    enqueue_fire_report("retracted", thermal_conf, None, None)
             elif last_state != "retract":
                 servo_client.trigger("retract")
                 last_state = "retract"
@@ -638,10 +645,11 @@ def main():
     print(f"Dashboard available at http://localhost:{DASHBOARD_PORT}")
 
     # AMG8833 thermal layer. The sensor is wired to the servo ESP32 and polled
-    # over the AP network. It gates the trigger (hottest pixel must clear the
-    # threshold) and drives aiming (turret steers toward the hottest pixel). If
+    # over the AP network. It is the sole trigger for aiming and firing: the
+    # hottest pixel must clear the threshold, and the turret steers toward that
+    # pixel. The webcam/YOLO pipeline only annotates the dashboard preview. If
     # the endpoint is unreachable, the controller still boots and thermal_ok
-    # follows THERMAL_FAIL_OPEN.
+    # follows THERMAL_FAIL_OPEN (but no fresh reading means no trigger).
     thermal_sensor = ThermalSensor(
         base_url=SERVO_BASE_URL,
         threshold_c=THERMAL_THRESHOLD_C,
