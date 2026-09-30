@@ -14,6 +14,12 @@ Movement commands are *coalesced*: the client tracks the desired direction per
 axis and only enqueues a batch when that desired state actually changes. A slow
 or unreachable ESP32 therefore cannot build a backlog of redundant moves.
 
+Because coalescing means a single dropped/ignored HTTP request would leave the
+turret stuck, the command worker also *re-asserts* the current desired movement
+state to the ESP32 every ``SERVO_MOVE_REFRESH_INTERVAL`` seconds. This keeps the
+servo continuously informed of which direction to move even if a command was
+lost, without flooding it with per-frame requests.
+
 The module-level ``servo_get`` helper is kept for the Flask routes, which run
 on their own thread and may block harmlessly.
 """
@@ -28,6 +34,7 @@ from config import (
     SCAN_STATUS_POLL_INTERVAL,
     SERVO_CMD_QUEUE_MAX,
     SERVO_HTTP_TIMEOUT,
+    SERVO_MOVE_REFRESH_INTERVAL,
 )
 
 # Directions that stop each axis (both are sent to halt continuous movement).
@@ -59,10 +66,12 @@ class ServoClient:
 
     def __init__(self, base_url, http_timeout=SERVO_HTTP_TIMEOUT,
                  status_poll_interval=SCAN_STATUS_POLL_INTERVAL,
-                 queue_max=SERVO_CMD_QUEUE_MAX):
+                 queue_max=SERVO_CMD_QUEUE_MAX,
+                 move_refresh_interval=SERVO_MOVE_REFRESH_INTERVAL):
         self._base_url = base_url.rstrip("/")
         self._http_timeout = http_timeout
         self._status_poll_interval = status_poll_interval
+        self._move_refresh_interval = move_refresh_interval
 
         self._queue = queue.Queue(maxsize=queue_max)
         self._stop = threading.Event()
@@ -149,13 +158,48 @@ class ServoClient:
         with self._status_lock:
             return dict(self._status) if self._status is not None else None
 
+    def _reassert_batch(self):
+        """Build a batch that re-states the full desired movement state.
+
+        Returns a list of (path, params) commands that drive every axis to its
+        currently desired state: a moving axis gets its opposite direction
+        stopped and its direction started, and a stopped axis gets both
+        directions stopped. Re-sending the desired state makes the commands
+        idempotent, so a previously dropped/ignored request is corrected and
+        the ESP32 always knows which direction to move (or to stay stopped).
+        """
+        with self._desired_lock:
+            desired = dict(self._desired)
+
+        batch = []
+        for axis, direction in desired.items():
+            dirs = _AXIS_STOP_DIRS[axis]
+            if direction is None:
+                batch.extend(
+                    ("/api/move", {"axis": axis, "dir": d, "cmd": "stop"})
+                    for d in dirs
+                )
+                continue
+            opposite = dirs[0] if direction == dirs[1] else dirs[1]
+            batch.append(("/api/move", {"axis": axis, "dir": opposite, "cmd": "stop"}))
+            batch.append(("/api/move", {"axis": axis, "dir": direction, "cmd": "start"}))
+        return batch
+
     # -- worker loops ------------------------------------------------------
     def _command_loop(self):
+        last_refresh = time.monotonic()
         while not self._stop.is_set():
             try:
                 batch = self._queue.get(timeout=0.1)
             except queue.Empty:
-                continue
+                # Nothing queued: periodically re-assert the desired movement
+                # so the ESP32 always knows which direction to move, even if an
+                # earlier command was dropped or ignored.
+                if time.monotonic() - last_refresh >= self._move_refresh_interval:
+                    batch = self._reassert_batch()
+                    last_refresh = time.monotonic()
+                else:
+                    continue
             for path, params in batch:
                 if self._stop.is_set():
                     return
