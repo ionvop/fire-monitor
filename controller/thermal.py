@@ -9,8 +9,10 @@ HTTP server as:
     -> {"ok":true,"max_temp_c":<float>,"row":<int>,"col":<int>}
 
 This module polls that endpoint in a background thread and exposes the hottest
-pixel temperature plus a boolean "thermal OK" verdict used as a second
-verification layer before the fire trigger fires.
+pixel temperature, its grid position (row/col), and a boolean "thermal OK"
+verdict. The temperature is used as a second verification layer before the fire
+trigger fires, and the row/col position drives turret aiming: the controller
+steers toward the hottest pixel instead of the webcam fire bbox.
 
 The wire protocol mirrors the ESP32 sketch at `arduino/servo/servo.ino`.
 """
@@ -47,8 +49,9 @@ class ThermalSensor:
     """Reads the hottest AMG8833 pixel temperature from the ESP32 HTTP API.
 
     Runs a daemon poller thread that GETs ``/api/thermal`` on the servo ESP32,
-    keeping the latest temperature and its timestamp. ``read()`` returns the
-    current max temperature and whether it clears the configured threshold.
+    keeping the latest temperature, its grid position, and its timestamp.
+    ``read()`` returns the current max temperature, whether it clears the
+    configured threshold, and the hottest pixel's (row, col).
 
     If the endpoint is unreachable, the sensor is marked unavailable and
     ``read()`` reports ``thermal_ok`` according to ``fail_open`` so the rest of
@@ -64,6 +67,8 @@ class ThermalSensor:
         self._fail_open = fail_open
         self._lock = threading.Lock()
         self._max_temp_c = None
+        self._row = None
+        self._col = None
         self._last_read_time = None
         self._available = False
         self._stop = threading.Event()
@@ -101,9 +106,11 @@ class ThermalSensor:
         if parsed is None:
             return False
 
-        temp, _row, _col = parsed
+        temp, row, col = parsed
         with self._lock:
             self._max_temp_c = temp
+            self._row = row
+            self._col = col
             self._last_read_time = time.monotonic()
         return True
 
@@ -114,26 +121,30 @@ class ThermalSensor:
             self._stop.wait(self._poll_interval)
 
     def read(self):
-        """Return (max_temp_c, thermal_ok).
+        """Return (max_temp_c, thermal_ok, row, col).
 
         ``max_temp_c`` is the hottest pixel temperature in degrees Celsius, or
         None if the sensor is unavailable or stale. ``thermal_ok`` is True when
         the temperature clears the threshold; when the sensor is unavailable or
-        stale it follows the ``fail_open`` setting.
+        stale it follows the ``fail_open`` setting. ``row``/``col`` are the
+        hottest pixel's 0-based grid coordinates (0..7), or None when no fresh
+        reading is available.
         """
         with self._lock:
             max_temp_c = self._max_temp_c
+            row = self._row
+            col = self._col
             last_read_time = self._last_read_time
 
         if not self._available or max_temp_c is None:
-            return None, self._fail_open
+            return None, self._fail_open, None, None
 
         if last_read_time is not None and (
             time.monotonic() - last_read_time > STALE_SECONDS
         ):
-            return None, self._fail_open
+            return None, self._fail_open, None, None
 
-        return max_temp_c, max_temp_c >= self._threshold_c
+        return max_temp_c, max_temp_c >= self._threshold_c, row, col
 
     def close(self):
         """Stop the poller thread."""
