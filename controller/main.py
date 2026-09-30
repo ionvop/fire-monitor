@@ -29,6 +29,8 @@ from config import (
     THERMAL_POLL_INTERVAL,
     THERMAL_THRESHOLD_C,
     THERMAL_TRACK_DEADBAND_PIXELS,
+    THERMAL_TRACK_SETTLE_TIMEOUT,
+    THERMAL_TRACK_STEP_DEGREES,
     WEBCAM_INDEX,
 )
 from alerts import enqueue_fire_report, start_alert_worker, stop_alert_worker
@@ -47,9 +49,6 @@ from thermal import ThermalSensor
 SERVO_BASE_URL = f"http://{SERVO_IP}"
 DASHBOARD_DIR = "dashboard"
 DIST_DIR = os.path.join(DASHBOARD_DIR, "dist")
-
-# The ESP32 moves the servo 1 degree every MOVE_INTERVAL (20 ms).
-DEGREE_MOVE_SECONDS = 0.02
 
 app = Flask(__name__, static_folder=None)
 socketio = SocketIO(app, cors_allowed_origins="*")
@@ -229,15 +228,18 @@ scanner = RoomScanner()
 # Fire detection & control loop
 # ---------------------------------------------------------------------------
 def track_thermal(row, col):
-    """Continuously steer the turret toward the thermal hottest pixel.
+    """Steer the turret toward the thermal hottest pixel by microadjusting.
 
     Only called in automatic mode while the thermal trigger is active (the
     hottest pixel clears the threshold). The AMG8833 reports an 8x8 grid; the
-    hottest pixel's (row, col) is compared to the grid center (3.5, 3.5). As
-    long as the hot pixel is outside the configured deadzone
-    (THERMAL_TRACK_DEADBAND_PIXELS), continuous /api/move commands keep the
-    turret moving toward it instead of jumping to an absolute angle. Once the
-    hot pixel is within the deadzone on both axes, all movement stops.
+    hottest pixel's (row, col) is compared to the grid center (3.5, 3.5).
+
+    Unlike the previous continuous-movement approach, this reads the turret's
+    current X/Y angle from the cached /api/status, nudges each off-center axis
+    by THERMAL_TRACK_STEP_DEGREES using an absolute move, waits for the ESP32 to
+    report the new angle (up to THERMAL_TRACK_SETTLE_TIMEOUT), then the caller
+    compares again on the next loop iteration. An axis within
+    THERMAL_TRACK_DEADBAND_PIXELS of center is left untouched.
 
     THERMAL_FLIP_X / THERMAL_FLIP_Y invert the mapping for a rotated or
     mirrored sensor mount.
@@ -248,6 +250,11 @@ def track_thermal(row, col):
     if row is None or col is None:
         return False
 
+    status = get_status()
+    if status is None:
+        # No known turret position; cannot compute an absolute target.
+        return False
+
     # Offset of the hot pixel from the grid center (3.5, 3.5).
     dx = col - 3.5
     dy = row - 3.5
@@ -256,19 +263,31 @@ def track_thermal(row, col):
     if THERMAL_FLIP_Y:
         dy = -dy
 
-    # X axis: keep moving toward the hot pixel horizontally while off-center.
+    # X axis: nudge toward the hot pixel horizontally while off-center.
+    # dx > 0 means the hot pixel is to the right, so increase the X angle.
     if abs(dx) > THERMAL_TRACK_DEADBAND_PIXELS:
-        servo_client.set_move("x", "right" if dx > 0 else "left")
-    else:
-        servo_client.stop_axis("x")
+        current_x = status.get("x")
+        if current_x is not None:
+            target_x = max(0, min(180, current_x + (
+                THERMAL_TRACK_STEP_DEGREES if dx > 0 else -THERMAL_TRACK_STEP_DEGREES
+            )))
+            if target_x != current_x:
+                servo_client.set_angle("x", target_x)
+                servo_client.wait_for_angle("x", target_x, THERMAL_TRACK_SETTLE_TIMEOUT)
 
-    # Y axis: keep moving toward the hot pixel vertically while off-center.
+    # Y axis: nudge toward the hot pixel vertically while off-center.
     # dy > 0 means the hot pixel is below the grid center, so the camera must
-    # tilt down to follow it; dy < 0 means it is above, so tilt up.
+    # tilt down to follow it; dy < 0 means it is above, so tilt up. The API
+    # convention is "higher = up", so tilting down decreases the Y angle.
     if abs(dy) > THERMAL_TRACK_DEADBAND_PIXELS:
-        servo_client.set_move("y", "down" if dy > 0 else "up")
-    else:
-        servo_client.stop_axis("y")
+        current_y = status.get("y")
+        if current_y is not None:
+            target_y = max(0, min(180, current_y + (
+                -THERMAL_TRACK_STEP_DEGREES if dy > 0 else THERMAL_TRACK_STEP_DEGREES
+            )))
+            if target_y != current_y:
+                servo_client.set_angle("y", target_y)
+                servo_client.wait_for_angle("y", target_y, THERMAL_TRACK_SETTLE_TIMEOUT)
 
     return True
 
@@ -395,9 +414,10 @@ def detection_loop(model, cap, thermal_sensor=None):
                     stop_all_movement()
         else:
             if last_state == "fire":
-                # The fire is no longer detected. Stop any continuous tracking
-                # movement immediately so the turret doesn't keep drifting
-                # toward where the fire was before scanning resumes.
+                # The fire is no longer detected. Stop any continuous movement
+                # (e.g. leftover scanning) so the turret doesn't keep drifting
+                # before scanning resumes. Absolute tracking leaves no
+                # continuous movement running, so this is a safe no-op there.
                 stop_all_movement()
                 if fire_start_time is not None and (current_time - fire_start_time) >= MIN_FIRE_DURATION:
                     servo_client.trigger("retract")
