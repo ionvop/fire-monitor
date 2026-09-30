@@ -51,7 +51,7 @@ THERMAL_FLIP_X = False
 THERMAL_FLIP_Y = False
 # The turret is considered aimed at the hot pixel when its grid offset from the
 # grid center (3.5) is within this many pixels; the axis stops inside it.
-THERMAL_TRACK_DEADBAND_PIXELS = 0.5
+THERMAL_TRACK_DEADBAND_PIXELS = 0
 
 # Fire screenshot auto-capture
 CAPTURE_DIR = "captures"          # directory (gitignored) for saved fire screenshots
