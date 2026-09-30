@@ -35,6 +35,7 @@ from config import (
     SERVO_CMD_QUEUE_MAX,
     SERVO_HTTP_TIMEOUT,
     SERVO_MOVE_REFRESH_INTERVAL,
+    THERMAL_TRACK_SETTLE_POLL,
 )
 
 # Directions that stop each axis (both are sent to halt continuous movement).
@@ -152,6 +153,23 @@ class ServoClient:
     def set_angle(self, axis, angle):
         """Move an axis to an absolute angle."""
         self._enqueue([(f"/api/servo/{axis}", {"angle": angle})])
+
+    def wait_for_angle(self, axis, target, timeout, poll_interval=THERMAL_TRACK_SETTLE_POLL):
+        """Block until the cached status reports ``axis`` at ``target``.
+
+        Used after an absolute move so the caller can compare the hot pixel
+        against the *new* turret position instead of a stale one. Returns True
+        once the reported angle matches ``target``, or False if ``timeout``
+        elapses first (e.g. the command was dropped or the ESP32 is slow).
+        """
+        deadline = time.monotonic() + timeout
+        while True:
+            status = self.get_status()
+            if status is not None and status.get(axis) == target:
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(poll_interval)
 
     def get_status(self):
         """Return the latest cached status dict, or None if never fetched."""
