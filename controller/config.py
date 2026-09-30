@@ -35,7 +35,7 @@ FIRE_CONF_THRESHOLD = 0.7
 THERMAL_ENABLED = True
 THERMAL_THRESHOLD_C = 50.0
 # How often the controller polls the ESP32 /api/thermal endpoint (seconds).
-THERMAL_POLL_INTERVAL = 0.2
+THERMAL_POLL_INTERVAL = 0.1
 # Per-request HTTP timeout when polling the thermal endpoint (seconds).
 THERMAL_HTTP_TIMEOUT = 4.0
 # When the thermal sensor is unavailable (endpoint unreachable or no fresh
