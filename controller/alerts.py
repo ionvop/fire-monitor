@@ -21,6 +21,7 @@ if the remote API is unreachable.
 """
 
 import json
+import queue
 import threading
 import time
 
@@ -28,6 +29,7 @@ import requests
 
 from config import (
     ALERT_COOLDOWN_SECONDS,
+    ALERT_QUEUE_MAX,
     API_BASE_URL,
     PUSH_ENABLED,
     VAPID_CLAIMS_EMAIL,
@@ -37,6 +39,13 @@ from config import (
 # In-memory cooldown state. Not persisted: a controller restart resets it.
 _state_lock = threading.Lock()
 _last_alert_ts = 0.0  # time.monotonic() of the last logged/pushed detection
+
+# Background worker that performs the blocking log/push network I/O so the
+# detection loop never waits on the remote API.
+_alert_queue = queue.Queue(maxsize=ALERT_QUEUE_MAX)
+_worker_stop = threading.Event()
+_worker_thread = None
+_worker_lock = threading.Lock()
 
 
 def _now() -> float:
@@ -144,9 +153,27 @@ def send_push(title: str, body: str, data: dict | None = None) -> None:
             print(f"Push failed for {endpoint}: {exc}")
 
 
+def _report_fire_now(status: str, confidence: float, x: float, y: float,
+                     capture_url: str | None = None) -> None:
+    """Perform the blocking log + push for a fire report.
+
+    This is the synchronous body shared by the public ``report_fire`` API and
+    the background worker. It assumes the cooldown gate has already been
+    evaluated by the caller.
+    """
+    _log_fire(status, confidence, x, y, capture_url)
+
+    if status == "detected":
+        send_push(
+            "Fire detected",
+            f"A fire was detected with {confidence:.0%} confidence.",
+            data={"confidence": confidence, "x": x, "y": y},
+        )
+
+
 def report_fire(status: str, confidence: float, x: float, y: float,
                 capture_url: str | None = None, force: bool = False) -> None:
-    """Report a fire detection/retraction to the remote backend.
+    """Report a fire detection/retraction to the remote backend (blocking).
 
     Args:
         status: "detected" or "retracted".
@@ -158,6 +185,9 @@ def report_fire(status: str, confidence: float, x: float, y: float,
     On a fresh detection (not in cooldown), logs to fire_history and sends a
     push. Retractions are always logged but never pushed. All failures are
     non-fatal.
+
+    Note: this call blocks on network I/O. The detection loop should use
+    ``enqueue_fire_report`` instead so it never stalls.
     """
     if status == "detected":
         if not force and _in_cooldown():
@@ -165,11 +195,68 @@ def report_fire(status: str, confidence: float, x: float, y: float,
             return
         _mark_alerted()
 
-    _log_fire(status, confidence, x, y, capture_url)
+    _report_fire_now(status, confidence, x, y, capture_url)
 
+
+def enqueue_fire_report(status: str, confidence: float, x: float, y: float,
+                        capture_url: str | None = None) -> None:
+    """Queue a fire report for the background worker (non-blocking).
+
+    The cooldown gate is evaluated here, at producer time, so the 1-hour
+    window is preserved even if the worker is busy. When the queue is full the
+    oldest pending report is dropped.
+    """
     if status == "detected":
-        send_push(
-            "Fire detected",
-            f"A fire was detected with {confidence:.0%} confidence.",
-            data={"confidence": confidence, "x": x, "y": y},
+        if _in_cooldown():
+            print("Fire alert suppressed: cooldown active.")
+            return
+        _mark_alerted()
+
+    item = (status, confidence, x, y, capture_url)
+    try:
+        _alert_queue.put_nowait(item)
+    except queue.Full:
+        try:
+            _alert_queue.get_nowait()
+        except queue.Empty:
+            pass
+        try:
+            _alert_queue.put_nowait(item)
+        except queue.Full:
+            pass
+
+
+def _alert_worker_loop() -> None:
+    """Drain the alert queue, performing blocking log/push off the main loop."""
+    while not _worker_stop.is_set():
+        try:
+            status, confidence, x, y, capture_url = _alert_queue.get(timeout=0.1)
+        except queue.Empty:
+            continue
+        try:
+            _report_fire_now(status, confidence, x, y, capture_url)
+        except Exception as exc:  # never let the worker die
+            print(f"Alert worker error: {exc}")
+
+
+def start_alert_worker() -> None:
+    """Start the background alert worker (idempotent)."""
+    global _worker_thread
+    with _worker_lock:
+        if _worker_thread is not None and _worker_thread.is_alive():
+            return
+        _worker_stop.clear()
+        _worker_thread = threading.Thread(
+            target=_alert_worker_loop, daemon=True, name="alert-worker",
         )
+        _worker_thread.start()
+
+
+def stop_alert_worker() -> None:
+    """Stop the background alert worker."""
+    global _worker_thread
+    with _worker_lock:
+        _worker_stop.set()
+        if _worker_thread is not None:
+            _worker_thread.join(timeout=1.0)
+            _worker_thread = None
