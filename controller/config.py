@@ -65,6 +65,12 @@ SERVO_HTTP_TIMEOUT = 4.0
 # Bounded queue sizes for the background workers. When a queue is full the
 # oldest item is dropped so the detection loop never blocks on a slow backend.
 SERVO_CMD_QUEUE_MAX = 64
+# Movement commands are coalesced (only sent when the desired direction
+# changes), so a single dropped/ignored HTTP request would leave the turret
+# stuck. The command worker re-asserts the current desired movement state to
+# the ESP32 at this interval (seconds) so it always knows which direction to
+# move. Keep this well below the time it takes the turret to visibly drift.
+SERVO_MOVE_REFRESH_INTERVAL = 0.5
 ALERT_QUEUE_MAX = 16
 CAPTURE_QUEUE_MAX = 8
 
