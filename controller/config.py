@@ -62,7 +62,7 @@ THERMAL_TRACK_DEADBAND_PIXELS = 0
 # hottest pixel's offset from the grid center, and nudges each off-center axis
 # by this many degrees using an absolute move (/api/servo/{axis}?angle=). It
 # then waits for the reported angle to reach the target and repeats.
-THERMAL_TRACK_STEP_DEGREES = 1
+THERMAL_TRACK_STEP_DEGREES = 5
 # After issuing an absolute move, wait up to this long (seconds) for the ESP32
 # to report the new angle before comparing again. This prevents double-stepping
 # on a stale status cache while bounding how long the detection loop can block.
