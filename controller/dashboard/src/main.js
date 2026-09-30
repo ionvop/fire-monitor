@@ -18,6 +18,7 @@ const badgeMode = document.getElementById("badgeMode");
 const badgeScan = document.getElementById("badgeScan");
 const badgeFire = document.getElementById("badgeFire");
 const badgeThermal = document.getElementById("badgeThermal");
+const badgeHotPixel = document.getElementById("badgeHotPixel");
 const connStatus = document.getElementById("connStatus");
 
 // Mode toggle element (ON = auto, OFF = manual)
@@ -118,6 +119,7 @@ function pollStatus() {
             updateThreshold(data.fire_conf_threshold);
             updateScanDirection(data.scan_direction, data.auto_mode, data.fire_active);
             updateThermal(data.max_temp_c, data.thermal_ok, data.thermal_enabled);
+            updateHotPixel(data.thermal_row, data.thermal_col, data.thermal_enabled);
         })
         .catch((err) => console.error("Status poll failed:", err));
 }
@@ -155,6 +157,23 @@ function updateThermal(maxTempC, thermalOk, enabled) {
     badgeThermal.classList.toggle("badge-success", ok);
     badgeThermal.classList.toggle("badge-error", !ok);
     badgeThermal.classList.toggle("badge-outline", false);
+}
+
+function updateHotPixel(row, col, enabled) {
+    // Show the AMG8833 hottest pixel's grid position, which drives aiming.
+    if (enabled === false) {
+        badgeHotPixel.textContent = "Hot pixel: off";
+        badgeHotPixel.classList.remove("badge-success", "badge-error");
+        badgeHotPixel.classList.add("badge-outline");
+        return;
+    }
+
+    const hasPixel = Number.isFinite(row) && Number.isFinite(col);
+    badgeHotPixel.textContent = hasPixel
+        ? `Hot pixel: r${row} c${col}`
+        : "Hot pixel: —";
+    badgeHotPixel.classList.toggle("badge-success", hasPixel);
+    badgeHotPixel.classList.toggle("badge-outline", !hasPixel);
 }
 
 function updateScanDirection(direction, auto, fireActive) {
