@@ -70,7 +70,7 @@ SERVO_CMD_QUEUE_MAX = 64
 # stuck. The command worker re-asserts the current desired movement state to
 # the ESP32 at this interval (seconds) so it always knows which direction to
 # move. Keep this well below the time it takes the turret to visibly drift.
-SERVO_MOVE_REFRESH_INTERVAL = 0.5
+SERVO_MOVE_REFRESH_INTERVAL = 0.1
 ALERT_QUEUE_MAX = 16
 CAPTURE_QUEUE_MAX = 8
 
