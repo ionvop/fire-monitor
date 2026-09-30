@@ -15,7 +15,7 @@ MIN_FIRE_DURATION = 1.0
 # Debug safety switch: when True, the physical trigger is never fired, neither
 # from automatic fire-on-detection nor from the manual dashboard trigger. Theq
 # safe "retract" state still works. Set to False for normal operation.
-DEBUG_DISABLE_TRIGGER = True
+DEBUG_DISABLE_TRIGGER = False
 
 # Webcam
 WEBCAM_INDEX = 0
@@ -57,9 +57,20 @@ SCAN_Y_MAX = 110
 SCAN_CORNER_TOLERANCE = 10  # degrees of error allowed before a corner is "reached"
 SCAN_STATUS_POLL_INTERVAL = 0.1  # seconds between /api/status polls
 
+# ---------------------------------------------------------------------------
+# Async worker tuning
+# ---------------------------------------------------------------------------
+# Per-request HTTP timeout for servo commands issued by the background worker.
+SERVO_HTTP_TIMEOUT = 1.0
+# Bounded queue sizes for the background workers. When a queue is full the
+# oldest item is dropped so the detection loop never blocks on a slow backend.
+SERVO_CMD_QUEUE_MAX = 64
+ALERT_QUEUE_MAX = 16
+CAPTURE_QUEUE_MAX = 8
+
 # Fire is considered "centered" when its bbox center is within this many pixels
 # of the frame center; the turret stops moving once inside this deadzone.
-FIRE_TRACK_DEADBAND_PIXELS = 20
+FIRE_TRACK_DEADBAND_PIXELS = 1
 
 # ---------------------------------------------------------------------------
 # Remote alerting (fire_history logging + Web Push notifications)
