@@ -21,6 +21,12 @@ const badgeThermal = document.getElementById("badgeThermal");
 const badgeHotPixel = document.getElementById("badgeHotPixel");
 const connStatus = document.getElementById("connStatus");
 
+// Thermal minimap (blank 8x8 grid; hottest pixel highlighted above threshold)
+const thermalMinimap = document.getElementById("thermalMinimap");
+const thermalMapCaption = document.getElementById("thermalMapCaption");
+const THERMAL_GRID_SIZE = 8;
+const thermalCells = [];
+
 // Mode toggle element (ON = auto, OFF = manual)
 const modeToggle = document.getElementById("modeToggle");
 const autoFireRow = document.getElementById("autoFireRow");
@@ -51,6 +57,7 @@ initialize();
 
 function initialize() {
     imgStream.src = "/video_feed";
+    buildThermalMinimap();
     attachButton(btnUp, "up");
     attachButton(btnDown, "down");
     attachButton(btnLeft, "left");
@@ -120,6 +127,14 @@ function pollStatus() {
             updateScanDirection(data.scan_direction, data.auto_mode, data.fire_active);
             updateThermal(data.max_temp_c, data.thermal_ok, data.thermal_enabled);
             updateHotPixel(data.thermal_row, data.thermal_col, data.thermal_enabled);
+            updateMinimap(
+                data.thermal_row,
+                data.thermal_col,
+                data.max_temp_c,
+                data.thermal_threshold_c,
+                data.thermal_enabled,
+                data.thermal_ok
+            );
         })
         .catch((err) => console.error("Status poll failed:", err));
 }
@@ -174,6 +189,51 @@ function updateHotPixel(row, col, enabled) {
         : "Hot pixel: —";
     badgeHotPixel.classList.toggle("badge-success", hasPixel);
     badgeHotPixel.classList.toggle("badge-outline", !hasPixel);
+}
+
+function buildThermalMinimap() {
+    // Build the blank 8x8 grid once; cells are updated in place afterwards.
+    thermalMinimap.replaceChildren();
+    thermalCells.length = 0;
+    for (let i = 0; i < THERMAL_GRID_SIZE * THERMAL_GRID_SIZE; i++) {
+        const cell = document.createElement("div");
+        cell.className = "thermal-cell";
+        thermalMinimap.appendChild(cell);
+        thermalCells.push(cell);
+    }
+}
+
+function updateMinimap(row, col, maxTempC, thresholdC, enabled, thermalOk) {
+    // Clear any previous highlight.
+    for (const cell of thermalCells) {
+        cell.classList.remove("thermal-cell-hot");
+    }
+
+    if (enabled === false) {
+        thermalMapCaption.textContent = "off";
+        return;
+    }
+
+    const temp = Number.isFinite(maxTempC) ? maxTempC : null;
+    const threshold = Number.isFinite(thresholdC) ? thresholdC : null;
+    const hasPixel = Number.isFinite(row) && Number.isFinite(col);
+
+    // Highlight only when the hottest pixel is at/above the threshold.
+    // Fall back to the server's thermal_ok flag if no threshold is provided.
+    const aboveThreshold = threshold !== null
+        ? temp !== null && temp >= threshold
+        : thermalOk === true;
+
+    if (hasPixel && aboveThreshold) {
+        const index = row * THERMAL_GRID_SIZE + col;
+        if (thermalCells[index]) {
+            thermalCells[index].classList.add("thermal-cell-hot");
+        }
+    }
+
+    const tempText = temp !== null ? `${temp.toFixed(1)}°C` : "—";
+    const thresholdText = threshold !== null ? `${threshold.toFixed(1)}°C` : "—";
+    thermalMapCaption.textContent = `${tempText} / ${thresholdText}`;
 }
 
 function updateScanDirection(direction, auto, fireActive) {
