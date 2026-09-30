@@ -40,10 +40,13 @@ int apiToServoX(int api) {
   return 180 - api;
 }
 
-bool moveUp = false;
-bool moveDown = false;
-bool moveLeft = false;
-bool moveRight = false;
+// Directional movement state. Each axis holds exactly one direction (or none),
+// which makes the mutually-exclusive nature of the axes explicit.
+enum MoveX { MOVE_X_NONE, MOVE_X_LEFT, MOVE_X_RIGHT };
+enum MoveY { MOVE_Y_NONE, MOVE_Y_UP, MOVE_Y_DOWN };
+
+MoveX moveX = MOVE_X_NONE;
+MoveY moveY = MOVE_Y_NONE;
 int angleX = 90;
 int angleY = 90;
 int angleTrigger = 90;
@@ -101,7 +104,7 @@ void loop() {
   if (now - lastMoveTime >= MOVE_INTERVAL) {
     lastMoveTime = now;
 
-    if (moveUp) {
+    if (moveY == MOVE_Y_UP) {
       angleY += 1;
 
       if (angleY > 180) {
@@ -109,7 +112,7 @@ void loop() {
       }
     }
 
-    if (moveDown) {
+    if (moveY == MOVE_Y_DOWN) {
       angleY -= 1;
 
       if (angleY < 0) {
@@ -117,7 +120,7 @@ void loop() {
       }
     }
 
-    if (moveLeft) {
+    if (moveX == MOVE_X_LEFT) {
       angleX -= 1;
 
       if (angleX < 0) {
@@ -125,7 +128,7 @@ void loop() {
       }
     }
 
-    if (moveRight) {
+    if (moveX == MOVE_X_RIGHT) {
       angleX += 1;
 
       if (angleX > 180) {
@@ -259,22 +262,34 @@ void handleMove() {
 
   if (axis == "x") {
     if (dir == "left") {
-      moveRight = false;
-      moveLeft = start;
+      if (start) {
+        moveX = MOVE_X_LEFT;
+      } else if (moveX == MOVE_X_LEFT) {
+        moveX = MOVE_X_NONE;
+      }
     } else if (dir == "right") {
-      moveLeft = false;
-      moveRight = start;
+      if (start) {
+        moveX = MOVE_X_RIGHT;
+      } else if (moveX == MOVE_X_RIGHT) {
+        moveX = MOVE_X_NONE;
+      }
     } else {
       server.send(400, "text/plain", "Invalid dir. Use left or right");
       return;
     }
   } else if (axis == "y") {
     if (dir == "up") {
-      moveDown = false;
-      moveUp = start;
+      if (start) {
+        moveY = MOVE_Y_UP;
+      } else if (moveY == MOVE_Y_UP) {
+        moveY = MOVE_Y_NONE;
+      }
     } else if (dir == "down") {
-      moveUp = false;
-      moveDown = start;
+      if (start) {
+        moveY = MOVE_Y_DOWN;
+      } else if (moveY == MOVE_Y_DOWN) {
+        moveY = MOVE_Y_NONE;
+      }
     } else {
       server.send(400, "text/plain", "Invalid dir. Use up or down");
       return;
