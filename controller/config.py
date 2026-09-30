@@ -23,13 +23,16 @@ WEBCAM_INDEX = 0
 # Fire detection
 FIRE_CONF_THRESHOLD = 0.7
 
-# AMG8833 thermal verification layer
+# AMG8833 thermal camera
 # The AMG8833 is wired directly to the servo ESP32 over I2C and exposed at
-# http://<SERVO_IP>/api/thermal. It provides a second verification layer:
-# before the trigger fires, the hottest detected pixel must also exceed
+# http://<SERVO_IP>/api/thermal. It provides the hottest pixel's temperature
+# AND its grid position (row/col). The temperature is a second verification
+# layer: before the trigger fires, the hottest detected pixel must also exceed
 # THERMAL_THRESHOLD_C. When THERMAL_ENABLED is True, BOTH the YOLO confidence
-# threshold AND the thermal threshold must pass.
-THERMAL_ENABLED = False
+# threshold AND the thermal threshold must pass. The row/col position drives
+# turret aiming: the controller steers toward the hottest pixel rather than the
+# webcam fire bbox.
+THERMAL_ENABLED = True
 THERMAL_THRESHOLD_C = 50.0
 # How often the controller polls the ESP32 /api/thermal endpoint (seconds).
 THERMAL_POLL_INTERVAL = 0.2
@@ -38,7 +41,17 @@ THERMAL_HTTP_TIMEOUT = 4.0
 # When the thermal sensor is unavailable (endpoint unreachable or no fresh
 # reading), THERMAL_FAIL_OPEN=True lets detection proceed (fail-open); False
 # blocks firing (fail-closed).
-THERMAL_FAIL_OPEN = True
+THERMAL_FAIL_OPEN = False
+
+# AMG8833 grid orientation. The sensor reports an 8x8 grid (row 0..7, col 0..7,
+# row-major). By default row 0 is the top and col 0 is the left, so a hot pixel
+# with col > 3.5 is to the right and row > 3.5 is below center. Flip these if
+# the sensor is mounted rotated/mirrored so aiming still tracks the heat.
+THERMAL_FLIP_X = False
+THERMAL_FLIP_Y = False
+# The turret is considered aimed at the hot pixel when its grid offset from the
+# grid center (3.5) is within this many pixels; the axis stops inside it.
+THERMAL_TRACK_DEADBAND_PIXELS = 0.5
 
 # Fire screenshot auto-capture
 CAPTURE_DIR = "captures"          # directory (gitignored) for saved fire screenshots
@@ -73,10 +86,6 @@ SERVO_CMD_QUEUE_MAX = 64
 SERVO_MOVE_REFRESH_INTERVAL = 0.1
 ALERT_QUEUE_MAX = 16
 CAPTURE_QUEUE_MAX = 8
-
-# Fire is considered "centered" when its bbox center is within this many pixels
-# of the frame center; the turret stops moving once inside this deadzone.
-FIRE_TRACK_DEADBAND_PIXELS = 1
 
 # ---------------------------------------------------------------------------
 # Remote alerting (fire_history logging + Web Push notifications)
