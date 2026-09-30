@@ -103,7 +103,9 @@ All behavior is configured in `controller/config.py`:
 | `THERMAL_FAIL_OPEN` | `True` | If the sensor is unavailable, allow firing (`True`) or block it (`False`). |
 | `THERMAL_FLIP_X` | `False` | Invert the hot pixel's horizontal mapping (for a mirrored/rotated sensor mount). |
 | `THERMAL_FLIP_Y` | `False` | Invert the hot pixel's vertical mapping (for a mirrored/rotated sensor mount). |
-| `THERMAL_TRACK_DEADBAND_PIXELS` | `0.5` | Grid offset from center (3.5) within which the turret stops aiming. |
+| `THERMAL_TRACK_DEADBAND_PIXELS` | `0` | Grid offset from center (3.5) within which the turret stops nudging. |
+| `THERMAL_TRACK_STEP_DEGREES` | `1` | Degrees per absolute microadjustment while centering on the hot pixel. |
+| `THERMAL_TRACK_SETTLE_TIMEOUT` | `0.5` | Max seconds to wait for the reported angle to reach the target before comparing again. |
 | `DASHBOARD_HOST` | `0.0.0.0` | Host the dashboard server binds to. |
 | `DASHBOARD_PORT` | `5000` | Port the dashboard server listens on. |
 | `SCAN_X_MIN` / `SCAN_X_MAX` | `0` / `180` | Pan (X) sweep limits in degrees. |
@@ -138,7 +140,8 @@ The Servo ESP32 exposes the following endpoints for integration:
 | --- | --- | --- |
 | `/api/status` | — | Returns current `x`, `y`, and `trigger` angles as JSON. |
 | `/api/thermal` | — | Returns the hottest AMG8833 pixel: `{"ok":true,"max_temp_c":<f>,"row":<r>,"col":<c>}` (or `{"ok":false,"error":"..."}`). |
-| `/api/move` | `axis=x/y`, `dir=left/right/up/down`, `cmd=start/stop` | Continuous movement control. |
+| `/api/move` | `axis=x/y`, `dir=left/right/up/down`, `cmd=start/stop` | Continuous movement control (used by room scanning). |
+| `/api/servo/x`, `/api/servo/y` | `angle=0..180` | Absolute angle move (used by thermal centering and manual control). |
 | `/api/servo/trigger` | `state=fire/retract` | Activates `fire()` or `retract()`. |
 | `/api/servo/x` | `angle=0-180` | Sets the X (pan) angle. |
 | `/api/servo/y` | `angle=0-180` | Sets the Y (tilt) angle. |
@@ -149,7 +152,7 @@ The Servo ESP32 exposes the following endpoints for integration:
 
 * **Detection:** The controller runs the YOLO model on each webcam frame. A detection of **Class 0** (fire) with confidence above `FIRE_CONF_THRESHOLD` triggers engagement. The webcam is used for the dashboard preview and fire-detection captures.
 * **Thermal verification:** When `THERMAL_ENABLED` is `True`, the AMG8833's hottest pixel must also exceed `THERMAL_THRESHOLD_C` before the trigger fires, so both the webcam and thermal layers must agree.
-* **Aiming:** While a fire is detected in automatic mode, the turret steers toward the **thermal hottest pixel** (its `row`/`col` on the 8x8 grid) rather than the webcam bbox center. It keeps moving until the hot pixel is within `THERMAL_TRACK_DEADBAND_PIXELS` of the grid center, then stops. Use `THERMAL_FLIP_X` / `THERMAL_FLIP_Y` if the sensor is mounted mirrored or rotated.
+* **Aiming:** While a fire is detected in automatic mode, the turret steers toward the **thermal hottest pixel** (its `row`/`col` on the 8x8 grid) rather than the webcam bbox center. It reads the current X/Y angle, compares it with the hot pixel's offset from the grid center, and nudges each off-center axis by `THERMAL_TRACK_STEP_DEGREES` using an absolute move, then waits for the new angle and repeats. It stops nudging once the hot pixel is within `THERMAL_TRACK_DEADBAND_PIXELS` of center. Use `THERMAL_FLIP_X` / `THERMAL_FLIP_Y` if the sensor is mounted mirrored or rotated.
 * **Scanning:** When no user is connected and no fire is active, the controller sweeps the turret across the room using the `/api/move` endpoints, reversing at the configured sweep limits and stepping the tilt axis periodically.
 * **Engagement:** On fire detection, the controller stops scanning and sends `trigger?state=fire`. After `MIN_FIRE_DURATION` seconds it sends `trigger?state=retract`, then resumes scanning.
 * **Manual mode:** When a dashboard user connects (via WebSocket), the controller stops automatic scanning and lets the user control the turret manually. When the last user disconnects, automatic scanning resumes.
