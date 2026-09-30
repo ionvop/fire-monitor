@@ -29,12 +29,12 @@ FIRE_CONF_THRESHOLD = 0.7
 # before the trigger fires, the hottest detected pixel must also exceed
 # THERMAL_THRESHOLD_C. When THERMAL_ENABLED is True, BOTH the YOLO confidence
 # threshold AND the thermal threshold must pass.
-THERMAL_ENABLED = True
+THERMAL_ENABLED = False
 THERMAL_THRESHOLD_C = 50.0
 # How often the controller polls the ESP32 /api/thermal endpoint (seconds).
 THERMAL_POLL_INTERVAL = 0.2
 # Per-request HTTP timeout when polling the thermal endpoint (seconds).
-THERMAL_HTTP_TIMEOUT = 1.0
+THERMAL_HTTP_TIMEOUT = 4.0
 # When the thermal sensor is unavailable (endpoint unreachable or no fresh
 # reading), THERMAL_FAIL_OPEN=True lets detection proceed (fail-open); False
 # blocks firing (fail-closed).
@@ -61,7 +61,7 @@ SCAN_STATUS_POLL_INTERVAL = 0.1  # seconds between /api/status polls
 # Async worker tuning
 # ---------------------------------------------------------------------------
 # Per-request HTTP timeout for servo commands issued by the background worker.
-SERVO_HTTP_TIMEOUT = 1.0
+SERVO_HTTP_TIMEOUT = 4.0
 # Bounded queue sizes for the background workers. When a queue is full the
 # oldest item is dropped so the detection loop never blocks on a slow backend.
 SERVO_CMD_QUEUE_MAX = 64
