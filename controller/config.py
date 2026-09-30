@@ -21,26 +21,29 @@ DEBUG_DISABLE_TRIGGER = False
 WEBCAM_INDEX = 0
 
 # Fire detection
+# Webcam/YOLO confidence threshold. This only controls which detections are
+# drawn on the dashboard preview; it no longer gates aiming or firing (the
+# AMG8833 thermal sensor is the sole trigger).
 FIRE_CONF_THRESHOLD = 0.7
 
 # AMG8833 thermal camera
 # The AMG8833 is wired directly to the servo ESP32 over I2C and exposed at
 # http://<SERVO_IP>/api/thermal. It provides the hottest pixel's temperature
-# AND its grid position (row/col). The temperature is a second verification
-# layer: before the trigger fires, the hottest detected pixel must also exceed
-# THERMAL_THRESHOLD_C. When THERMAL_ENABLED is True, BOTH the YOLO confidence
-# threshold AND the thermal threshold must pass. The row/col position drives
-# turret aiming: the controller steers toward the hottest pixel rather than the
-# webcam fire bbox.
+# AND its grid position (row/col). The thermal sensor is the sole trigger for
+# aiming and firing: the hottest pixel must exceed THERMAL_THRESHOLD_C before
+# the trigger fires. The row/col position drives turret aiming: the controller
+# steers toward the hottest pixel rather than the webcam fire bbox.
 THERMAL_ENABLED = True
-THERMAL_THRESHOLD_C = 50.0
+THERMAL_THRESHOLD_C = 40.0
 # How often the controller polls the ESP32 /api/thermal endpoint (seconds).
 THERMAL_POLL_INTERVAL = 0.1
 # Per-request HTTP timeout when polling the thermal endpoint (seconds).
 THERMAL_HTTP_TIMEOUT = 4.0
 # When the thermal sensor is unavailable (endpoint unreachable or no fresh
 # reading), THERMAL_FAIL_OPEN=True lets detection proceed (fail-open); False
-# blocks firing (fail-closed).
+# blocks firing (fail-closed). Note: firing also requires a fresh reading
+# (hottest pixel row/col), so an unavailable sensor never triggers firing even
+# when fail-open is set.
 THERMAL_FAIL_OPEN = False
 
 # AMG8833 grid orientation. The sensor reports an 8x8 grid (row 0..7, col 0..7,
