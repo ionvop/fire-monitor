@@ -10,9 +10,9 @@ HTTP server as:
 
 This module polls that endpoint in a background thread and exposes the hottest
 pixel temperature, its grid position (row/col), and a boolean "thermal OK"
-verdict. The temperature is used as a second verification layer before the fire
-trigger fires, and the row/col position drives turret aiming: the controller
-steers toward the hottest pixel instead of the webcam fire bbox.
+verdict. The temperature is the sole trigger for the fire trigger, and the
+row/col position drives turret aiming: the controller steers toward the hottest
+pixel instead of the webcam fire bbox.
 
 The wire protocol mirrors the ESP32 sketch at `arduino/servo/servo.ino`.
 """
