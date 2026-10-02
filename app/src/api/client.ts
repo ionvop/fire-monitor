@@ -3,9 +3,9 @@ import type { FireAlert, PushSubscriptionPayload } from "../types";
 /**
  * API client for the PHP backend.
  *
- * The frontend is deployed on the same InfinityFree domain as the API, so all
- * requests use relative same-origin paths (no CORS headers are sent by the
- * host). Only GET and POST are supported by the server.
+ * The frontend is deployed on the same domain as the API, so all requests use
+ * relative same-origin paths (no CORS headers are sent by the host). The
+ * backend supports the standard HTTP verbs (GET, POST, PUT, DELETE).
  */
 
 const API_BASE = "/api";
