@@ -54,8 +54,8 @@ export default function App() {
           </span>
         </div>
         <div className="flex-none flex items-center gap-3">
-          <DashboardMenu />
           <SubscribeButton />
+          <DashboardMenu />
           <ConnectionStatus live={live} />
         </div>
       </div>
