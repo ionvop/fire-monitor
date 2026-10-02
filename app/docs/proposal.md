@@ -4,7 +4,7 @@ Build the foundation first so all other components have something to talk to.
    1. Set Up HTTPS Hosting: PWA Service Workers and Web Push require HTTPS. Set up your web hosting environment early (even a free tier host or local tunnel tool like Ngrok/Cloudflare Tunnels works for development, as long as it provides an https:// URL).
    2. Database Setup: Create a simple database with two tables:
       * `subscriptions`: To store user PWA push tokens (`endpoint`, `p256dh` key, `auth` key).
-      * `fire_history`: To log when a fire was detected (`id`, `timestamp`, `confidence_score`, etc.).
+      * `fire_history`: To log when a fire was detected (`id`, `timestamp`, `temperature_c`, etc.).
    3. Build the API Endpoints: Write two simple endpoints:
       * Receives JSON from your PWA and saves it to the database.
       * Receives a POST request from your Python script, inserts the log into fire_history, and eventually triggers the push logic.
