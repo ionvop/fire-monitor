@@ -367,16 +367,6 @@ def detection_loop(model, cap, thermal_sensor=None):
                 and thermal_col_reading is not None
             )
 
-        # Thermal-derived confidence for the alert payload. The webcam
-        # confidence is no longer meaningful now that thermal is the trigger.
-        if max_temp_c is not None and THERMAL_THRESHOLD_C > 0:
-            thermal_conf = max(
-                0.0,
-                min(1.0, (max_temp_c - THERMAL_THRESHOLD_C) / THERMAL_THRESHOLD_C),
-            )
-        else:
-            thermal_conf = 0.0
-
         current_time = time.monotonic()
 
         # Automatic fire-on-detection, driven solely by the thermal verdict. In
@@ -398,13 +388,7 @@ def detection_loop(model, cap, thermal_sensor=None):
                 # Report the detection to the remote backend (logs to
                 # fire_history and pushes to subscribers, subject to cooldown).
                 # Queued to a worker so the loop never blocks on the network.
-                status = get_status()
-                enqueue_fire_report(
-                    "detected",
-                    thermal_conf,
-                    status.get("x") if status else None,
-                    status.get("y") if status else None,
-                )
+                enqueue_fire_report("detected", max_temp_c)
 
             # In automatic mode, aim at the thermal hottest pixel while firing.
             # Manual mode keeps the old stop-and-fire-in-place behavior. If no
@@ -426,7 +410,8 @@ def detection_loop(model, cap, thermal_sensor=None):
                     with state_lock:
                         fire_active = False
                     # Report the retraction so the PWA marks the alert resolved.
-                    enqueue_fire_report("retracted", thermal_conf, None, None)
+                    # At most one retraction is logged per cooldown window.
+                    enqueue_fire_report("retracted", max_temp_c)
             elif last_state != "retract":
                 servo_client.trigger("retract")
                 last_state = "retract"
