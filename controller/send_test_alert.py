@@ -20,21 +20,15 @@ def main() -> None:
         action="store_true",
         help="Send a retraction instead of a detection.",
     )
-    parser.add_argument("--confidence", type=float, default=0.99,
-                        help="Confidence score to report (default: 0.99).")
-    parser.add_argument("--x", type=float, default=90.0,
-                        help="Servo pan angle (default: 90).")
-    parser.add_argument("--y", type=float, default=90.0,
-                        help="Servo tilt angle (default: 90).")
+    parser.add_argument("--temperature", type=float, default=55.0,
+                        help="Hottest-pixel temperature in Celsius (default: 55).")
     args = parser.parse_args()
 
     status = "retracted" if args.retract else "detected"
     print(f"Sending {status} alert (force, bypassing cooldown)...")
     report_fire(
         status,
-        args.confidence,
-        args.x,
-        args.y,
+        args.temperature,
         force=True,
     )
     print("Done.")
