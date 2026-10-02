@@ -14,7 +14,9 @@ Two responsibilities:
 
 A 1-hour cooldown (``ALERT_COOLDOWN_SECONDS``) gates *both* logging and push:
 while a cooldown is active, a new detection is a no-op. Retractions are always
-logged (they are cheap and informative) but never pushed.
+logged (they are cheap and informative) but never pushed, and are themselves
+limited to one entry per cooldown window so a flapping detection cannot fill
+the history with "Fire resolved" rows.
 
 All network failures are non-fatal — the detection loop must keep running even
 if the remote API is unreachable.
@@ -39,6 +41,7 @@ from config import (
 # In-memory cooldown state. Not persisted: a controller restart resets it.
 _state_lock = threading.Lock()
 _last_alert_ts = 0.0  # time.monotonic() of the last logged/pushed detection
+_last_retract_ts = 0.0  # time.monotonic() of the last logged retraction
 
 # Background worker that performs the blocking log/push network I/O so the
 # detection loop never waits on the remote API.
@@ -64,18 +67,26 @@ def _mark_alerted() -> None:
         _last_alert_ts = _now()
 
 
-def _log_fire(status: str, confidence: float, x: float, y: float,
-              capture_url: str | None) -> None:
+def _in_retract_cooldown() -> bool:
+    """Return True if a retraction was logged within the cooldown window."""
+    with _state_lock:
+        return (_now() - _last_retract_ts) < ALERT_COOLDOWN_SECONDS
+
+
+def _mark_retracted() -> None:
+    global _last_retract_ts
+    with _state_lock:
+        _last_retract_ts = _now()
+
+
+def _log_fire(status: str, temperature_c: float | None) -> None:
     """POST a record to /api/fire_history/. Non-fatal on failure."""
     try:
         resp = requests.post(
             f"{API_BASE_URL}/fire_history/",
             json={
                 "status": status,
-                "confidence_score": confidence,
-                "x": x,
-                "y": y,
-                "capture_image_url": capture_url,
+                "temperature_c": temperature_c,
                 # "timestamp" is optional; the server defaults to UTC now.
             },
             timeout=5,
@@ -153,38 +164,40 @@ def send_push(title: str, body: str, data: dict | None = None) -> None:
             print(f"Push failed for {endpoint}: {exc}")
 
 
-def _report_fire_now(status: str, confidence: float, x: float, y: float,
-                     capture_url: str | None = None) -> None:
+def _report_fire_now(status: str, temperature_c: float | None) -> None:
     """Perform the blocking log + push for a fire report.
 
     This is the synchronous body shared by the public ``report_fire`` API and
     the background worker. It assumes the cooldown gate has already been
     evaluated by the caller.
     """
-    _log_fire(status, confidence, x, y, capture_url)
+    _log_fire(status, temperature_c)
 
     if status == "detected":
+        if temperature_c is not None:
+            body = f"A fire was detected at {temperature_c:.1f}°C."
+        else:
+            body = "A fire was detected."
         send_push(
             "Fire detected",
-            f"A fire was detected with {confidence:.0%} confidence.",
-            data={"confidence": confidence, "x": x, "y": y},
+            body,
+            data={"temperature_c": temperature_c},
         )
 
 
-def report_fire(status: str, confidence: float, x: float, y: float,
-                capture_url: str | None = None, force: bool = False) -> None:
+def report_fire(status: str, temperature_c: float | None,
+                force: bool = False) -> None:
     """Report a fire detection/retraction to the remote backend (blocking).
 
     Args:
         status: "detected" or "retracted".
-        confidence: thermal-derived confidence (0.0-1.0) at detection.
-        x, y: servo pan/tilt angles at detection.
-        capture_url: optional URL of the annotated capture image.
-        force: bypass the cooldown (used by the standalone test script).
+        temperature_c: AMG8833 hottest-pixel temperature (Celsius) at the
+            transition, or None when the sensor reading is unavailable.
+        force: bypass the cooldowns (used by the standalone test script).
 
     On a fresh detection (not in cooldown), logs to fire_history and sends a
-    push. Retractions are always logged but never pushed. All failures are
-    non-fatal.
+    push. Retractions are never pushed and are logged at most once per cooldown
+    window. All failures are non-fatal.
 
     Note: this call blocks on network I/O. The detection loop should use
     ``enqueue_fire_report`` instead so it never stalls.
@@ -194,15 +207,19 @@ def report_fire(status: str, confidence: float, x: float, y: float,
             print("Fire alert suppressed: cooldown active.")
             return
         _mark_alerted()
+    elif status == "retracted":
+        if not force and _in_retract_cooldown():
+            print("Fire retraction suppressed: cooldown active.")
+            return
+        _mark_retracted()
 
-    _report_fire_now(status, confidence, x, y, capture_url)
+    _report_fire_now(status, temperature_c)
 
 
-def enqueue_fire_report(status: str, confidence: float, x: float, y: float,
-                        capture_url: str | None = None) -> None:
+def enqueue_fire_report(status: str, temperature_c: float | None) -> None:
     """Queue a fire report for the background worker (non-blocking).
 
-    The cooldown gate is evaluated here, at producer time, so the 1-hour
+    The cooldown gates are evaluated here, at producer time, so the 1-hour
     window is preserved even if the worker is busy. When the queue is full the
     oldest pending report is dropped.
     """
@@ -211,8 +228,13 @@ def enqueue_fire_report(status: str, confidence: float, x: float, y: float,
             print("Fire alert suppressed: cooldown active.")
             return
         _mark_alerted()
+    elif status == "retracted":
+        if _in_retract_cooldown():
+            print("Fire retraction suppressed: cooldown active.")
+            return
+        _mark_retracted()
 
-    item = (status, confidence, x, y, capture_url)
+    item = (status, temperature_c)
     try:
         _alert_queue.put_nowait(item)
     except queue.Full:
@@ -230,11 +252,11 @@ def _alert_worker_loop() -> None:
     """Drain the alert queue, performing blocking log/push off the main loop."""
     while not _worker_stop.is_set():
         try:
-            status, confidence, x, y, capture_url = _alert_queue.get(timeout=0.1)
+            status, temperature_c = _alert_queue.get(timeout=0.1)
         except queue.Empty:
             continue
         try:
-            _report_fire_now(status, confidence, x, y, capture_url)
+            _report_fire_now(status, temperature_c)
         except Exception as exc:  # never let the worker die
             print(f"Alert worker error: {exc}")
 
