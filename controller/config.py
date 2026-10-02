@@ -66,7 +66,7 @@ THERMAL_TRACK_STEP_DEGREES = 5
 # After issuing an absolute move, wait up to this long (seconds) for the ESP32
 # to report the new angle before comparing again. This prevents double-stepping
 # on a stale status cache while bounding how long the detection loop can block.
-THERMAL_TRACK_SETTLE_TIMEOUT = 0.5
+THERMAL_TRACK_SETTLE_TIMEOUT = 0.3
 # How often (seconds) to re-read the cached status while waiting for the angle
 # to reach the target.
 THERMAL_TRACK_SETTLE_POLL = 0.02
