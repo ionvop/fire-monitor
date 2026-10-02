@@ -11,9 +11,6 @@ CREATE TABLE `subscriptions` (
 CREATE TABLE `fire_history` (
     `id` INTEGER PRIMARY KEY AUTOINCREMENT,
     `timestamp` TEXT NOT NULL DEFAULT (datetime('now')),
-    `confidence_score` REAL,
-    `status` TEXT NOT NULL DEFAULT 'detected',
-    `x` REAL,
-    `y` REAL,
-    `capture_image_url` TEXT
+    `temperature_c` REAL,
+    `status` TEXT NOT NULL DEFAULT 'detected'
 );
