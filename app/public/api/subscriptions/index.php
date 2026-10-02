@@ -6,11 +6,11 @@
  * Stores the browser's Web Push subscription (endpoint + p256dh + auth keys)
  * so the server can later send push notifications when a fire is detected.
  *
- * Endpoints (InfinityFree: only GET and POST are allowed):
- *   GET  /api/subscriptions/            -> list all subscriptions
- *   GET  /api/subscriptions/?id=1       -> get one subscription
- *   POST /api/subscriptions/            -> save a subscription (upsert by endpoint)
- *   POST /api/subscriptions/?id=1       -> delete a subscription (_method=DELETE)
+ * Endpoints:
+ *   GET    /api/subscriptions/            -> list all subscriptions
+ *   GET    /api/subscriptions/?id=1       -> get one subscription
+ *   POST   /api/subscriptions/            -> save a subscription (upsert by endpoint)
+ *   DELETE /api/subscriptions/?id=1       -> delete a subscription
  *
  * Saving uses an upsert keyed on the unique `endpoint`, so a PWA that
  * re-subscribes (or whose token rotates) updates the existing row instead of
@@ -20,7 +20,6 @@
 require_once "../common.php";
 header("Content-Type: application/json");
 $data = json_decode(file_get_contents("php://input"), true);
-$method = $data["_method"] ?? ($_POST["_method"] ?? "POST");
 
 switch ($_SERVER["REQUEST_METHOD"]) {
     case "GET":
@@ -54,54 +53,47 @@ switch ($_SERVER["REQUEST_METHOD"]) {
         echo json_encode($subscriptions);
         exit;
     case "POST":
-        switch ($method) {
-            case "POST":
-                // Validate required push-token fields.
-                $endpoint = $data["endpoint"] ?? null;
-                $p256dh = $data["p256dh"] ?? null;
-                $auth = $data["auth"] ?? null;
+        // Validate required push-token fields.
+        $endpoint = $data["endpoint"] ?? null;
+        $p256dh = $data["p256dh"] ?? null;
+        $auth = $data["auth"] ?? null;
 
-                if ($endpoint == null || $p256dh == null || $auth == null) {
-                    http_response_code(400);
-                    echo json_encode(["message" => "Missing endpoint, p256dh, or auth."]);
-                    exit;
-                }
-
-                // Upsert keyed on the unique endpoint.
-                executePreparedQuery($db, <<<SQL
-                    INSERT INTO `subscriptions` (`endpoint`, `p256dh`, `auth`)
-                    VALUES (:endpoint, :p256dh, :auth)
-                    ON CONFLICT (`endpoint`) DO UPDATE SET
-                        `p256dh` = excluded.`p256dh`,
-                        `auth` = excluded.`auth`
-                SQL, [
-                    ":endpoint" => $endpoint,
-                    ":p256dh" => $p256dh,
-                    ":auth" => $auth
-                ]);
-
-                echo json_encode(["message" => "Subscription saved."]);
-                exit;
-            case "DELETE":
-                if (isset($_GET["id"]) == false) {
-                    http_response_code(400);
-                    echo json_encode(["message" => "Missing id."]);
-                    exit;
-                }
-
-                executePreparedQuery($db, <<<SQL
-                    DELETE FROM `subscriptions` WHERE `id` = :id
-                SQL, [
-                    ":id" => $_GET["id"]
-                ]);
-
-                echo json_encode(["message" => "Subscription deleted."]);
-                exit;
-            default:
-                http_response_code(422);
-                echo json_encode(["message" => "Method not allowed."]);
-                exit;
+        if ($endpoint == null || $p256dh == null || $auth == null) {
+            http_response_code(400);
+            echo json_encode(["message" => "Missing endpoint, p256dh, or auth."]);
+            exit;
         }
+
+        // Upsert keyed on the unique endpoint.
+        executePreparedQuery($db, <<<SQL
+            INSERT INTO `subscriptions` (`endpoint`, `p256dh`, `auth`)
+            VALUES (:endpoint, :p256dh, :auth)
+            ON CONFLICT (`endpoint`) DO UPDATE SET
+                `p256dh` = excluded.`p256dh`,
+                `auth` = excluded.`auth`
+        SQL, [
+            ":endpoint" => $endpoint,
+            ":p256dh" => $p256dh,
+            ":auth" => $auth
+        ]);
+
+        echo json_encode(["message" => "Subscription saved."]);
+        exit;
+    case "DELETE":
+        if (isset($_GET["id"]) == false) {
+            http_response_code(400);
+            echo json_encode(["message" => "Missing id."]);
+            exit;
+        }
+
+        executePreparedQuery($db, <<<SQL
+            DELETE FROM `subscriptions` WHERE `id` = :id
+        SQL, [
+            ":id" => $_GET["id"]
+        ]);
+
+        echo json_encode(["message" => "Subscription deleted."]);
+        exit;
     default:
         http_response_code(405);
         echo json_encode(["message" => "Method not allowed."]);
