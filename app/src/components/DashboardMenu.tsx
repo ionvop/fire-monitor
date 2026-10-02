@@ -32,7 +32,7 @@ export default function DashboardMenu() {
           className="btn btn-sm btn-outline"
           aria-label="Open controller dashboard"
         >
-          📊 Dashboard
+          📊
         </button>
         <ul
           tabIndex={0}
