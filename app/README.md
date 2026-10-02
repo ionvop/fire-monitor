@@ -126,11 +126,8 @@ a local SQLite file (`database.db`) and exposes JSON endpoints.
 CREATE TABLE `fire_history` (
     `id` INTEGER PRIMARY KEY AUTOINCREMENT,
     `timestamp` TEXT NOT NULL DEFAULT (datetime('now')),  -- UTC
-    `confidence_score` REAL,
-    `status` TEXT NOT NULL DEFAULT 'detected',            -- 'detected' | 'retracted'
-    `x` REAL,                                             -- servo pan angle
-    `y` REAL,                                             -- servo tilt angle
-    `capture_image_url` TEXT
+    `temperature_c` REAL,                                 -- AMG8833 hottest pixel (°C)
+    `status` TEXT NOT NULL DEFAULT 'detected'             -- 'detected' | 'retracted'
 );
 
 CREATE TABLE `subscriptions` (
@@ -179,11 +176,8 @@ List fire-detection history, **newest first** (ordered by `id DESC`).
   {
     "id": 1,
     "timestamp": "2026-09-07 12:34:56",
-    "confidence_score": 0.87,
-    "status": "detected",
-    "x": 90.0,
-    "y": 80.0,
-    "capture_image_url": null
+    "temperature_c": 55.3,
+    "status": "detected"
   }
 ]
 ```
@@ -201,18 +195,15 @@ Insert a fire-detection record. **This is the endpoint the controller posts to.*
 ```json
 {
   "timestamp": "2026-09-07 12:34:56",
-  "confidence_score": 0.87,
-  "status": "detected",
-  "x": 90.0,
-  "y": 80.0,
-  "capture_image_url": "https://example.com/captures/1.jpg"
+  "temperature_c": 55.3,
+  "status": "detected"
 }
 ```
 
 - `timestamp` — ISO-8601 UTC string; defaults to server time (`datetime('now')`).
 - `status` — `"detected"` or `"retracted"`; defaults to `"detected"`.
-- `x` / `y` — servo pan/tilt angles at detection (optional).
-- `capture_image_url` — URL of the annotated capture image (optional).
+- `temperature_c` — AMG8833 hottest-pixel temperature in Celsius at the
+  transition (optional).
 
 **Response:** `200` — `{ "message": "Record created." }`.
 
@@ -267,9 +258,8 @@ A full CRUD example over the `todos` table demonstrating the API conventions:
 ## API Reference for the Controller
 
 This is the contract for agents working in **`../controller/`** (the Python
-YOLOv8 detection loop). The controller currently does **not** call this API —
-it should POST a record to `fire_history` on each detection/retraction so the
-PWA can render it.
+AMG8833 thermal detection loop). The controller POSTs a record to
+`fire_history` on each detection/retraction so the PWA can render it.
 
 ### Reporting a fire detection
 
@@ -280,17 +270,13 @@ import requests
 
 API_BASE = "https://YOUR-DOMAIN.tk/api"  # same-origin as the PWA
 
-def report_fire(status: str, confidence: float, x: float, y: float,
-                capture_url: str | None = None) -> None:
+def report_fire(status: str, temperature_c: float | None) -> None:
     """status: 'detected' or 'retracted'."""
     requests.post(
         f"{API_BASE}/fire_history/",
         json={
             "status": status,
-            "confidence_score": confidence,
-            "x": x,
-            "y": y,
-            "capture_image_url": capture_url,
+            "temperature_c": temperature_c,
             # "timestamp" is optional; the server defaults to UTC now.
         },
         timeout=5,
@@ -306,11 +292,8 @@ def report_fire(status: str, confidence: float, x: float, y: float,
 - **`status`:** send `"detected"` when a fire is first confirmed, and
   `"retracted"` when it is no longer detected. The PWA treats `"detected"` as
   an active alert and `"retracted"` as resolved.
-- **`confidence_score`:** the YOLO confidence (0.0–1.0) at detection.
-- **`x` / `y`:** the servo pan/tilt angles at detection, if available.
-- **`capture_image_url`:** optional URL of the annotated capture image. The
-  controller already saves screenshots to `controller/captures/` — if those are
-  served over HTTP(S), pass their URL here.
+- **`temperature_c`:** the AMG8833 hottest-pixel temperature (Celsius) at the
+  transition, or `null` when the sensor reading is unavailable.
 - **Errors:** a non-`2xx` response returns `{ "message": "..." }`. Treat
   network failures as non-fatal — the detection loop should keep running.
 
