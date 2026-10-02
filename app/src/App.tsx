@@ -4,6 +4,7 @@ import { POLL_INTERVAL_MS, MAX_ALERTS } from "./config";
 import type { FireAlert } from "./types";
 import ConnectionStatus from "./components/ConnectionStatus";
 import AlertCard from "./components/AlertCard";
+import DashboardMenu from "./components/DashboardMenu";
 import EmptyView from "./components/EmptyView";
 import ErrorView from "./components/ErrorView";
 import SubscribeButton from "./components/SubscribeButton";
@@ -53,6 +54,7 @@ export default function App() {
           </span>
         </div>
         <div className="flex-none flex items-center gap-3">
+          <DashboardMenu />
           <SubscribeButton />
           <ConnectionStatus live={live} />
         </div>
