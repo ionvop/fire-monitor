@@ -23,6 +23,10 @@ Built with **React 19 + Vite 6 + TypeScript + Tailwind CSS v4 + DaisyUI 5**.
 - Lets the user **subscribe to Web Push** notifications. The browser subscribes
   using the embedded VAPID public key, then persists the subscription to the
   backend via `POST /api/subscriptions/`.
+- Provides a **Dashboard** button that links to the controller's manual-control
+  dashboard, either over the **LAN** (`http://192.168.4.2:5000`) or through a
+  **dev tunnel** (`https://abc123-5000.asse.devtunnels.ms/`). Both URLs are
+  editable in the UI and persisted to `localStorage`.
 - Runs as a PWA: `public/manifest.json` + `public/sw.js` (service worker) +
   generated icons.
 
@@ -48,13 +52,16 @@ app/
 └── src/
     ├── main.tsx               # Entry
     ├── App.tsx                # Polls history, renders list + status
-    ├── config.ts              # VAPID_PUBLIC_KEY, POLL_INTERVAL_MS, MAX_ALERTS
+    ├── config.ts              # VAPID_PUBLIC_KEY, POLL_INTERVAL_MS, MAX_ALERTS,
+    │                          # DASHBOARD_LAN_URL, DASHBOARD_TUNNEL_URL
     ├── types.ts               # FireAlert, PushSubscriptionPayload, ...
     ├── styles.css             # Tailwind + DaisyUI entry
     ├── api/client.ts          # fetchFireHistory(), saveSubscription()
     ├── services/push.ts       # SW registration, permission, subscribe
-    └── components/            # AlertCard, ConnectionStatus, EmptyView,
-                               # ErrorView, SubscribeButton
+    ├── services/dashboardUrls.ts  # Load/save/reset the dashboard URLs
+    └── components/            # AlertCard, ConnectionStatus, DashboardMenu,
+                               # DashboardSettingsModal, EmptyView, ErrorView,
+                               # SubscribeButton
 ```
 
 ---
@@ -97,12 +104,33 @@ php tools/init.php     # Recreates database.db from tools/schema.sql
 | `VAPID_PUBLIC_KEY`  | Public half of the Web Push VAPID key pair, embedded so the browser can subscribe. The **private** key must stay server-side (Phase 3 push sender) — never ship it in this bundle. |
 | `POLL_INTERVAL_MS`  | How often (ms) the fire-history list polls the API. Default `5000`.      |
 | `MAX_ALERTS`        | Max alerts kept in the on-screen list. Default `50`.                     |
+| `DASHBOARD_LAN_URL` | Default dashboard URL for the same-network case. Default `http://192.168.4.2:5000`. |
+| `DASHBOARD_TUNNEL_URL` | Default dashboard URL for the dev-tunnel case. Default `https://abc123-5000.asse.devtunnels.ms/`. |
+| `DASHBOARD_URLS_STORAGE_KEY` | `localStorage` key holding the user's URL overrides. Default `fire-monitor.dashboard-urls`. |
 
 Generate a VAPID key pair with:
 
 ```bash
 npx web-push generate-vapid-keys --json
 ```
+
+### Dashboard button
+
+The navbar **📊 Dashboard** button opens a dropdown with two links to the
+controller's manual-control dashboard (see the root
+[`README.md`](../README.md#4-dashboard)):
+
+| Link             | When to use it                                                        |
+| ---------------- | --------------------------------------------------------------------- |
+| **Same network** | The phone is on the same network as the controller (default `http://192.168.4.2:5000`). |
+| **Dev tunnel**   | The dashboard port is forwarded to the internet (default `https://abc123-5000.asse.devtunnels.ms/`). |
+
+Choose **⚙️ Edit URLs** to change either address. Values are validated as
+absolute `http(s)` URLs (a bare host such as `192.168.4.2:5000` is accepted and
+gets a scheme added), saved to `localStorage` under
+`DASHBOARD_URLS_STORAGE_KEY`, and applied immediately. **Reset to defaults**
+clears the stored overrides. Invalid or missing stored values silently fall back
+to the defaults in `src/config.ts`, so the button always has working links.
 
 ---
 
