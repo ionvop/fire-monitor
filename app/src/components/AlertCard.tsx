@@ -33,15 +33,9 @@ export default function AlertCard({ alert }: AlertCardProps) {
             {isActive ? "Fire detected" : "Fire resolved"}
           </h3>
           <p className="text-sm opacity-70">{formatTimestamp(alert.timestamp)}</p>
-          {alert.confidence_score != null && (
+          {alert.temperature_c != null && (
             <p className="text-sm">
-              Confidence: {Math.round(alert.confidence_score * 100)}%
-            </p>
-          )}
-          {(alert.x != null || alert.y != null) && (
-            <p className="text-sm">
-              Position: X {alert.x != null ? Math.round(alert.x) : "?"}° · Y{" "}
-              {alert.y != null ? Math.round(alert.y) : "?"}°
+              Temperature: {alert.temperature_c.toFixed(1)}°C
             </p>
           )}
         </div>
