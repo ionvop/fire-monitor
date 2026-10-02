@@ -109,18 +109,16 @@ npx web-push generate-vapid-keys --json
 ## Backend overview (`public/api/`)
 
 A dependency-free **PHP + SQLite3** backend designed for
-[InfinityFree](https://www.infinityfree.com/) shared hosting. It stores data in
-a local SQLite file (`database.db`) and exposes JSON endpoints. See
-[`public/api/README.md`](public/api/README.md) for the full scaffold docs.
+[Hostinger](https://www.hostinger.com/) shared hosting. It stores data in
+a local SQLite file (`database.db`) and exposes JSON endpoints.
 
-### Hosting constraints (important)
+### Hosting notes
 
-1. **Same-origin only.** InfinityFree sends no CORS headers, so the frontend
-   must be served from the **same domain** as the API. All requests use
-   relative `/api/...` paths — no CORS needed.
-2. **Only `GET` and `POST` are accepted.** `PUT`/`PATCH`/`DELETE` are rejected
-   outright. Full CRUD is achieved via **method tunneling**: the real verb is
-   carried in a JSON body field named `_method` (e.g. `_method=DELETE`).
+1. **Same-origin only.** The frontend is served from the **same domain** as the
+   API, so all requests use relative `/api/...` paths and no CORS headers are
+   needed.
+2. **Standard HTTP verbs.** The backend uses `GET`, `POST`, `PUT`, and `DELETE`
+   directly — no method tunneling.
 
 ### Database schema (`public/api/tools/schema.sql`)
 
@@ -163,9 +161,8 @@ php tools/export.php   # Regenerate schema.sql from the current database
 ## API Reference
 
 All endpoints return JSON. Errors use the shape `{ "message": "..." }` with an
-appropriate HTTP status code. Because of the hosting constraints above, **only
-`GET` and `POST` are real HTTP verbs**; `_method` in the JSON body tunnels
-`PUT`/`DELETE`.
+appropriate HTTP status code. The backend uses the standard HTTP verbs
+(`GET`, `POST`, `PUT`, `DELETE`).
 
 ### `GET /api/`
 
@@ -219,10 +216,10 @@ Insert a fire-detection record. **This is the endpoint the controller posts to.*
 
 **Response:** `200` — `{ "message": "Record created." }`.
 
-### `POST /api/fire_history/?id=1`
+### `DELETE /api/fire_history/?id=1`
 
-Delete a record via method tunneling. Body: `{ "_method": "DELETE" }`.
-**`400`** if `id` is missing, otherwise **`200`** `{ "message": "Record deleted." }`.
+Delete a record. **`400`** if `id` is missing, otherwise **`200`**
+`{ "message": "Record deleted." }`.
 
 ### `GET /api/subscriptions/`
 
@@ -248,15 +245,22 @@ the PWA's `SubscribeButton`.
 `{ "message": "Subscription saved." }`. Re-subscribing with the same endpoint
 updates the existing row (no UNIQUE-constraint error).
 
-### `POST /api/subscriptions/?id=1`
+### `DELETE /api/subscriptions/?id=1`
 
-Delete a subscription via method tunneling. Body: `{ "_method": "DELETE" }`.
+Delete a subscription. **`400`** if `id` is missing, otherwise **`200`**
+`{ "message": "Subscription deleted." }`.
 
-### `GET/POST /api/tasks/`
+### `/api/tasks/`
 
-A full CRUD example over the `todos` table demonstrating the API conventions
-(`_method=PUT` / `_method=DELETE` tunneling). See
-[`public/api/README.md`](public/api/README.md) for the endpoint table.
+A full CRUD example over the `todos` table demonstrating the API conventions:
+
+| Verb     | URL                | Body / Query                                | Action        |
+| -------- | ------------------ | ------------------------------------------- | ------------- |
+| `GET`    | `/api/tasks/`      | —                                           | List all tasks |
+| `GET`    | `/api/tasks/?id=1` | —                                           | Get one task  |
+| `POST`   | `/api/tasks/`      | JSON `{ "task": "..." }`                    | Create a task |
+| `PUT`    | `/api/tasks/?id=1` | JSON `{ "task": "...", "is_completed": 1 }` | Update a task |
+| `DELETE` | `/api/tasks/?id=1` | —                                           | Delete a task |
 
 ---
 
@@ -295,10 +299,10 @@ def report_fire(status: str, confidence: float, x: float, y: float,
 
 ### Contract notes
 
-- **Base URL:** the same InfinityFree domain as the PWA (same-origin). Use the
+- **Base URL:** the same domain as the PWA (same-origin). Use the
   relative path `/api/fire_history/` when the controller is served from the same
   host, or the absolute `https://<domain>/api/fire_history/` otherwise.
-- **Method:** `POST` only. No `_method` field is needed for inserts.
+- **Method:** `POST` for inserts, `DELETE` for removals.
 - **`status`:** send `"detected"` when a fire is first confirmed, and
   `"retracted"` when it is no longer detected. The PWA treats `"detected"` as
   an active alert and `"retracted"` as resolved.
