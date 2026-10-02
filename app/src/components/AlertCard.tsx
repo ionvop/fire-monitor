@@ -17,7 +17,7 @@ export default function AlertCard({ alert }: AlertCardProps) {
             isActive ? "bg-error/15" : "bg-primary/15"
           } rounded-full`}
         >
-          <div className="w-12 rounded-full">
+          <div className="flex items-center justify-center w-12 rounded-full">
             <span className={`text-2xl text-${accent}`}>
               {isActive ? "🔥" : "✅"}
             </span>
