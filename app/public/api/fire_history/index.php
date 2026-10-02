@@ -15,6 +15,7 @@
  *
  * The `timestamp` defaults to the server's current time (UTC) when omitted.
  * `status` defaults to 'detected' and should be 'detected' or 'retracted'.
+ * `temperature_c` is the AMG8833 hottest-pixel reading (Celsius) at detection.
  */
 
 require_once "../common.php";
@@ -55,25 +56,19 @@ switch ($_SERVER["REQUEST_METHOD"]) {
     case "POST":
         // Optional fields; defaults are applied by the schema.
         $timestamp = $data["timestamp"] ?? null;
-        $confidence = $data["confidence_score"] ?? null;
+        $temperature = $data["temperature_c"] ?? null;
         $status = $data["status"] ?? null;
-        $x = $data["x"] ?? null;
-        $y = $data["y"] ?? null;
-        $captureImageUrl = $data["capture_image_url"] ?? null;
 
         executePreparedQuery($db, <<<SQL
             INSERT INTO `fire_history`
-                (`timestamp`, `confidence_score`, `status`, `x`, `y`, `capture_image_url`)
+                (`timestamp`, `temperature_c`, `status`)
             VALUES
-                (COALESCE(:timestamp, datetime('now')), :confidence_score,
-                 COALESCE(:status, 'detected'), :x, :y, :capture_image_url)
+                (COALESCE(:timestamp, datetime('now')), :temperature_c,
+                 COALESCE(:status, 'detected'))
         SQL, [
             ":timestamp" => $timestamp,
-            ":confidence_score" => $confidence,
-            ":status" => $status,
-            ":x" => $x,
-            ":y" => $y,
-            ":capture_image_url" => $captureImageUrl
+            ":temperature_c" => $temperature,
+            ":status" => $status
         ]);
 
         echo json_encode(["message" => "Record created."]);
