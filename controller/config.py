@@ -102,6 +102,11 @@ SERVO_CMD_QUEUE_MAX = 64
 # the ESP32 at this interval (seconds) so it always knows which direction to
 # move. Keep this well below the time it takes the turret to visibly drift.
 SERVO_MOVE_REFRESH_INTERVAL = 0.1
+# Re-assert interval (seconds) for axes that are *stopped*. Re-sending "stop"
+# is only a safety net, and doing it at the moving rate floods the ESP32's
+# single-threaded web server (which also serves /api/status and /api/thermal),
+# causing dropped requests that made manual movement unreliable.
+SERVO_STOP_REFRESH_INTERVAL = 1.0
 ALERT_QUEUE_MAX = 16
 CAPTURE_QUEUE_MAX = 8
 
