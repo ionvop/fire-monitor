@@ -53,6 +53,14 @@ const thresholdValue = document.getElementById("thresholdValue");
 // Client-side mirror of the turret mode, used to guard manual commands.
 let isAutoMode = true;
 
+// Directions whose key/button is currently held. Tracked so a keyup always
+// clears the right entry, and so a keep-alive can re-assert the movement if
+// the server stopped the axis behind our back (e.g. stop_all_movement() when a
+// fire ends, or a mode switch).
+const heldDirections = new Set();
+const KEY_KEEPALIVE_MS = 500;
+let keyKeepAliveTimer = null;
+
 initialize();
 
 function initialize() {
@@ -104,6 +112,14 @@ function initialize() {
     // Keyboard shortcuts.
     window.addEventListener("keydown", (e) => handleKey(e, true));
     window.addEventListener("keyup", (e) => handleKey(e, false));
+
+    // Safety net: if the window loses focus or the tab is hidden while a key
+    // is held, the keyup may never arrive. Release everything so the turret
+    // cannot keep spinning.
+    window.addEventListener("blur", releaseAll);
+    document.addEventListener("visibilitychange", () => {
+        if (document.hidden) releaseAll();
+    });
 }
 
 function setConnStatus(connected) {
@@ -278,6 +294,9 @@ function updateMode(auto, autoFire) {
         btn.classList.toggle("btn-disabled", manualDisabled);
         btn.disabled = manualDisabled;
     });
+
+    // Entering automatic mode invalidates any held manual direction.
+    if (isAuto) releaseAll();
 }
 
 function setMode(mode) {
@@ -441,8 +460,70 @@ function handleKey(e, pressed) {
     if (!dir) return;
     e.preventDefault();
     if (isAutoMode) return;
-    if (pressed) startCommand(dir);
-    else stopCommand(dir);
+
+    if (pressed) {
+        // Holding a key fires keydown repeatedly. Ignoring the repeats keeps
+        // the request rate low (the ESP32's web server is single-threaded) and
+        // avoids re-sending "start" for a direction that is already moving.
+        if (e.repeat) return;
+        startCommand(dir);
+    } else {
+        stopCommand(dir);
+    }
+}
+
+function startCommand(direction) {
+    if (heldDirections.has(direction)) return;
+    heldDirections.add(direction);
+    sendCommand(direction, "start");
+    startKeyKeepAlive();
+}
+
+function stopCommand(direction) {
+    if (!heldDirections.delete(direction)) return;
+    sendCommand(direction, "stop");
+    if (heldDirections.size === 0) stopKeyKeepAlive();
+}
+
+function startKeyKeepAlive() {
+    if (keyKeepAliveTimer !== null) return;
+    // Re-assert held movement directions periodically. The server may stop an
+    // axis on its own (fire handling, mode switch), and a single lost request
+    // would otherwise leave the key appearing dead until it is released and
+    // pressed again. The trigger is excluded: re-sending "fire" is pointless
+    // and would spam the ESP32.
+    keyKeepAliveTimer = setInterval(() => {
+        if (isAutoMode) {
+            releaseAll();
+            return;
+        }
+        heldDirections.forEach((direction) => {
+            if (direction !== "shoot") sendCommand(direction, "start");
+        });
+    }, KEY_KEEPALIVE_MS);
+}
+
+function stopKeyKeepAlive() {
+    if (keyKeepAliveTimer === null) return;
+    clearInterval(keyKeepAliveTimer);
+    keyKeepAliveTimer = null;
+}
+
+function releaseAll() {
+    // Stop every held direction locally and tell the server to halt both axes,
+    // so a missed keyup cannot leave the turret moving.
+    const hadHeld = heldDirections.size > 0;
+    const hadShoot = heldDirections.has("shoot");
+    heldDirections.clear();
+    stopKeyKeepAlive();
+    if (!hadHeld) return;
+    if (hadShoot) {
+        // Retract directly: sendCommand() refuses to act in automatic mode, but
+        // releasing the trigger is always safe and must not be skipped.
+        fetch("/api/servo/trigger?state=retract")
+            .catch((err) => console.error("Trigger retract failed:", err));
+    }
+    fetch("/api/stop").catch((err) => console.error("Stop request failed:", err));
 }
 
 function sendCommand(direction, cmd) {
@@ -468,17 +549,9 @@ function sendCommand(direction, cmd) {
     }
 
     fetch(url)
-        .catch(err => console.error("Request failed:", err))
         .then(res => res.text())
-        .then(data => console.log(data));
-}
-
-function startCommand(direction) {
-    sendCommand(direction, "start");
-}
-
-function stopCommand(direction) {
-    sendCommand(direction, "stop");
+        .then(data => console.log(data))
+        .catch(err => console.error("Request failed:", err));
 }
 
 function attachButton(button, direction) {
