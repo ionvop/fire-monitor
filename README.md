@@ -127,7 +127,8 @@ The controller exposes the dashboard and proxies commands to the Servo ESP32:
 | `/` | GET | Serves the dashboard HTML. |
 | `/video_feed` | GET | MJPEG stream of the annotated webcam feed. |
 | `/api/status` | GET | Servo angles plus `manual_mode` and `fire_active` flags. |
-| `/api/move` | GET | Proxy for servo movement (`axis`, `dir`, `cmd`). |
+| `/api/move` | GET | Continuous movement (`axis`, `dir`, `cmd`). Queued through the servo client, which owns the desired movement state. |
+| `/api/stop` | GET | Stops continuous movement on both axes (dashboard safety net). |
 | `/api/servo/trigger` | GET | Proxy for firing (`state=fire` / `state=retract`). |
 | `/api/servo/x` | GET | Proxy to set the X angle (`angle`). |
 | `/api/servo/y` | GET | Proxy to set the Y angle (`angle`). |
@@ -140,7 +141,7 @@ The Servo ESP32 exposes the following endpoints for integration:
 | --- | --- | --- |
 | `/api/status` | — | Returns current `x`, `y`, and `trigger` angles as JSON. |
 | `/api/thermal` | — | Returns the hottest AMG8833 pixel: `{"ok":true,"max_temp_c":<f>,"row":<r>,"col":<c>}` (or `{"ok":false,"error":"..."}`). |
-| `/api/move` | `axis=x/y`, `dir=left/right/up/down`, `cmd=start/stop` | Continuous movement control (used by room scanning). |
+| `/api/move` | `axis=x/y`, `dir=left/right/up/down`, `cmd=start/stop` | Continuous movement control (used by room scanning and manual dashboard control). |
 | `/api/servo/x`, `/api/servo/y` | `angle=0..180` | Absolute angle move (used by thermal centering and manual control). |
 | `/api/servo/trigger` | `state=fire/retract` | Activates `fire()` or `retract()`. |
 | `/api/servo/x` | `angle=0-180` | Sets the X (pan) angle. |
