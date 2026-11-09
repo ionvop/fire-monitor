@@ -155,6 +155,10 @@ class RoomScanner:
         # Direction index into the up/right/down/left cycle. "Up" is increasing
         # Y (toward SCAN_Y_MAX), so the top edge sits at SCAN_Y_MAX.
         self._direction_index = 0
+        # True while the scanner owns the movement state. The detection loop
+        # calls stop() on every iteration, so without this flag a manual
+        # command issued from the dashboard would be cancelled ~50 ms later.
+        self._active = False
 
     @property
     def direction(self):
@@ -176,15 +180,32 @@ class RoomScanner:
             servo_client.set_move("y", direction)
 
     def stop(self):
-        """Stop all scanning movement."""
+        """Stop all scanning movement.
+
+        No-op when the scanner is not currently driving the turret, so the
+        detection loop's per-iteration stop() cannot cancel a manual command
+        issued from the dashboard.
+        """
+        if not self._active:
+            return
+        self._active = False
         self._set_x(None)
         self._set_y(None)
 
     def step(self):
         """Advance the scan by one poll interval."""
+        # Re-check the mode here: the detection loop may have read auto_mode
+        # just before the user switched to manual, and issuing a scan move
+        # after that would fight the manual command.
+        with state_lock:
+            if not auto_mode:
+                return
+
         status = get_status()
         if status is None:
             return
+
+        self._active = True
 
         x = status.get("x", 90)
         y = status.get("y", 90)
@@ -475,18 +496,48 @@ def api_status():
 
 @app.route("/api/move")
 def api_move():
+    """Start/stop continuous movement on one axis (manual dashboard control).
+
+    Routed through ServoClient rather than proxied straight to the ESP32 so the
+    client remains the single owner of the desired movement state. A direct
+    proxy would be silently cancelled by the client's periodic re-assert of
+    "stopped", which made a held arrow key nudge instead of move continuously.
+    """
     axis = request.args.get("axis")
     direction = request.args.get("dir")
     cmd = request.args.get("cmd")
     if not all((axis, direction, cmd)):
         return jsonify({"error": "Missing axis, dir, or cmd"}), 400
+    if axis not in ("x", "y"):
+        return jsonify({"error": "Invalid axis. Use x or y"}), 400
+    valid_dirs = ("left", "right") if axis == "x" else ("up", "down")
+    if direction not in valid_dirs:
+        return jsonify(
+            {"error": f"Invalid dir for axis {axis}. Use {' or '.join(valid_dirs)}"}
+        ), 400
+    if cmd not in ("start", "stop"):
+        return jsonify({"error": "Invalid cmd. Use start or stop"}), 400
     with state_lock:
         if auto_mode:
             return jsonify({"error": "Turret is in automatic mode. Manual controls are disabled."}), 403
-    resp = servo_get("/api/move", {"axis": axis, "dir": direction, "cmd": cmd})
-    if resp is None:
-        return jsonify({"error": "Servo controller unreachable"}), 502
-    return resp.text, resp.status_code
+
+    if cmd == "start":
+        servo_client.set_move(axis, direction)
+    else:
+        servo_client.stop_axis(axis)
+    return jsonify({"axis": axis, "dir": direction, "cmd": cmd})
+
+
+@app.route("/api/stop")
+def api_stop():
+    """Stop all continuous movement on both axes.
+
+    Used by the dashboard as a safety net when it loses focus or visibility
+    while a movement key is held, so a missed keyup cannot leave the turret
+    spinning.
+    """
+    stop_all_movement()
+    return jsonify({"stopped": True})
 
 
 @app.route("/api/servo/trigger")
@@ -526,8 +577,11 @@ def api_mode():
                 return jsonify({"error": "auto_fire must be a boolean"}), 400
             auto_fire = data["auto_fire"]
 
-    # Switching to manual mode stops any scanning movement.
+    # Switching to manual mode stops any scanning movement. Clear the scanner's
+    # ownership flag first so the detection loop's per-iteration stop() cannot
+    # cancel a manual command issued right after the switch.
     if not auto_mode:
+        scanner.stop()
         stop_all_movement()
 
     return jsonify({"auto_mode": auto_mode, "auto_fire": auto_fire})
