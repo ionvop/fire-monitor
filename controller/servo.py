@@ -16,9 +16,16 @@ or unreachable ESP32 therefore cannot build a backlog of redundant moves.
 
 Because coalescing means a single dropped/ignored HTTP request would leave the
 turret stuck, the command worker also *re-asserts* the current desired movement
-state to the ESP32 every ``SERVO_MOVE_REFRESH_INTERVAL`` seconds. This keeps the
-servo continuously informed of which direction to move even if a command was
-lost, without flooding it with per-frame requests.
+state to the ESP32 periodically. Moving axes are re-asserted every
+``SERVO_MOVE_REFRESH_INTERVAL`` seconds so the servo keeps moving even if a
+command was lost; stopped axes are re-asserted far less often
+(``SERVO_STOP_REFRESH_INTERVAL``) because re-sending "stop" is only a safety net
+and the extra traffic saturates the ESP32's single-threaded web server.
+
+This client is the *single owner* of the desired movement state. Manual
+dashboard commands must go through ``set_move`` / ``stop_axis`` rather than
+being proxied straight to the ESP32, otherwise the periodic re-assert of
+"stopped" cancels them.
 
 The module-level ``servo_get`` helper is kept for the Flask routes, which run
 on their own thread and may block harmlessly.
@@ -35,6 +42,7 @@ from config import (
     SERVO_CMD_QUEUE_MAX,
     SERVO_HTTP_TIMEOUT,
     SERVO_MOVE_REFRESH_INTERVAL,
+    SERVO_STOP_REFRESH_INTERVAL,
     THERMAL_TRACK_SETTLE_POLL,
 )
 
@@ -68,11 +76,13 @@ class ServoClient:
     def __init__(self, base_url, http_timeout=SERVO_HTTP_TIMEOUT,
                  status_poll_interval=SCAN_STATUS_POLL_INTERVAL,
                  queue_max=SERVO_CMD_QUEUE_MAX,
-                 move_refresh_interval=SERVO_MOVE_REFRESH_INTERVAL):
+                 move_refresh_interval=SERVO_MOVE_REFRESH_INTERVAL,
+                 stop_refresh_interval=SERVO_STOP_REFRESH_INTERVAL):
         self._base_url = base_url.rstrip("/")
         self._http_timeout = http_timeout
         self._status_poll_interval = status_poll_interval
         self._move_refresh_interval = move_refresh_interval
+        self._stop_refresh_interval = stop_refresh_interval
 
         self._queue = queue.Queue(maxsize=queue_max)
         self._stop = threading.Event()
@@ -176,18 +186,24 @@ class ServoClient:
         with self._status_lock:
             return dict(self._status) if self._status is not None else None
 
-    def _reassert_batch(self):
-        """Build a batch that re-states the full desired movement state.
+    def _reassert_batch(self, axes=None):
+        """Build a batch that re-states the desired movement state.
 
-        Returns a list of (path, params) commands that drive every axis to its
-        currently desired state: a moving axis gets its opposite direction
-        stopped and its direction started, and a stopped axis gets both
-        directions stopped. Re-sending the desired state makes the commands
-        idempotent, so a previously dropped/ignored request is corrected and
-        the ESP32 always knows which direction to move (or to stay stopped).
+        Returns a list of (path, params) commands that drive every requested
+        axis to its currently desired state: a moving axis gets its opposite
+        direction stopped and its direction started, and a stopped axis gets
+        both directions stopped. Re-sending the desired state makes the
+        commands idempotent, so a previously dropped/ignored request is
+        corrected and the ESP32 always knows which direction to move (or to
+        stay stopped).
+
+        ``axes`` limits the batch to a subset of axes (default: all).
         """
         with self._desired_lock:
             desired = dict(self._desired)
+
+        if axes is not None:
+            desired = {a: d for a, d in desired.items() if a in axes}
 
         batch = []
         for axis, direction in desired.items():
@@ -205,19 +221,40 @@ class ServoClient:
 
     # -- worker loops ------------------------------------------------------
     def _command_loop(self):
-        last_refresh = time.monotonic()
+        # Per-axis timestamp of the last re-assert. A moving axis is refreshed
+        # quickly (a lost "start" would visibly stall the turret), while a
+        # stopped axis is refreshed slowly: re-sending "stop" is only a safety
+        # net, and doing it at the fast rate floods the ESP32's single-threaded
+        # web server, which is what made manual movement unreliable.
+        last_refresh = {axis: time.monotonic() for axis in self._desired}
         while not self._stop.is_set():
             try:
                 batch = self._queue.get(timeout=0.1)
             except queue.Empty:
-                # Nothing queued: periodically re-assert the desired movement
-                # so the ESP32 always knows which direction to move, even if an
-                # earlier command was dropped or ignored.
-                if time.monotonic() - last_refresh >= self._move_refresh_interval:
-                    batch = self._reassert_batch()
-                    last_refresh = time.monotonic()
-                else:
+                # Nothing queued: re-assert whichever axes are due. A real
+                # command batch already states the desired state, so it resets
+                # every axis timer below.
+                now = time.monotonic()
+                with self._desired_lock:
+                    desired = dict(self._desired)
+                due = []
+                for axis, direction in desired.items():
+                    interval = (
+                        self._stop_refresh_interval if direction is None
+                        else self._move_refresh_interval
+                    )
+                    if now - last_refresh[axis] >= interval:
+                        due.append(axis)
+                if not due:
                     continue
+                for axis in due:
+                    last_refresh[axis] = now
+                batch = self._reassert_batch(due)
+            else:
+                now = time.monotonic()
+                for axis in last_refresh:
+                    last_refresh[axis] = now
+
             for path, params in batch:
                 if self._stop.is_set():
                     return
